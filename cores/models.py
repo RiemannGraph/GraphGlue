@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
-from modules.layers import GNNLayer, FeedForwardLayer
+from cores.layers import GNNLayer, FeedForwardLayer
 from torch_geometric.data import Data, Batch
-from utils.model_utils import ActivateModule, NormModule
+from cores.layers import ActivateModule, NormModule
 
 
 class PTGB(nn.Module):
@@ -72,6 +72,38 @@ class PooLedSubgraphGNN(nn.Module):
         x = self.out_norm(x)
         x = global_mean_pool(x, pool_batch)
         return x
+
+
+class RPGraphFM(nn.Module):
+    def __init__(self, configs):
+        super().__init__()
+        self.ptg_bank = PTGB(configs.M, configs.d, configs.hid_dim)
+        self.encoder = PooLedSubgraphGNN(configs.conv_name, configs.n_layers,
+                                         configs.in_dim, configs.hid_dim,
+                                         configs.normalize, configs.bias,
+                                         configs.norm_str, configs.act_str, configs.drop)
+        self.extractor = T.RootedEgoNets(configs.k_hops)
+        self.M = configs.M
+
+    def forward(self, graph):
+
+        return
+
+    @staticmethod
+    def PTG_loss():
+        pass
+
+    @staticmethod
+    def node2node_loss():
+        pass
+
+    @staticmethod
+    def node2graph_loss():
+        pass
+
+    @staticmethod
+    def graph2graph_loss(h_graph, h_graph_aug, temperature=0.1):
+        pass
 
 
 if __name__ == '__main__':

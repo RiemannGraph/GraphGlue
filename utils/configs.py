@@ -16,6 +16,8 @@ class DotDict(dict):
 
 
 def load_config(config_dict, json_file: str):
+    """加载配置文件"""
+    # YAML/JSON
     with open(json_file, 'rt') as f:
         config_dict.update(json.load(f))
     configs = DotDict(config_dict)

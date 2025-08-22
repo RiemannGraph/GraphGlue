@@ -1,11 +1,10 @@
 import torch
-import numpy as np
-import networkx as nx
 import torch_geometric.transforms as T
 from torch_geometric.datasets import AmazonProducts, Reddit, FB15k_237, PPI, MoleculeNet
 from ogb.nodeproppred import PygNodePropPredDataset
-from utils.data_process import KGNodeInitializer
+from data.data_process import KGNodeInitializer
 from torch_geometric.loader import NeighborLoader
+
 
 def load_pretrain_single_graph_data(configs):
     root, data_name = configs.root, configs.data_name
@@ -42,8 +41,9 @@ def load_pretrain_multi_graph_data(configs):
         raise ValueError('Invalid data_name')
     return dataset
 
+
 if __name__ == '__main__':
-    from utils.tools import DotDict
+    from utils.configs import DotDict
     configs = DotDict({})
     configs.data_name = "ogbn-arxiv"
     configs.root = "../datasets"
