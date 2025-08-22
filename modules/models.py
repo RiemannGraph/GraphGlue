@@ -49,7 +49,7 @@ class PTGB(nn.Module):
         return aug_sub_graphs
 
 
-class PooLedGNN(nn.Module):
+class PooLedSubgraphGNN(nn.Module):
     def __init__(self, conv_name: str, n_layers: int,
                  in_dim: int, hid_dim: int,
                  normalize: bool = True, bias: bool = True,
@@ -66,7 +66,7 @@ class PooLedGNN(nn.Module):
         self.out_norm = NormModule(norm_str, hid_dim)
         self.out_fc = FeedForwardLayer(hid_dim, hid_dim, hid_dim, bias, act_str, drop)
 
-    def forward(self, x, edge_index, edge_weight, pool_batch=None):
+    def forward(self, x, edge_index, edge_weight=None, pool_batch=None):
         for conv in self.convs:
             x = conv(x, edge_index, edge_weight)
         x = self.out_norm(x)
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     ptgb = PTGB(2, 16, 32)
     x, n_id, sub_edge_index, n_sub_batch = graph.x, graph.n_id, graph.sub_edge_index, graph.n_sub_batch
     sub_graphs = ptgb(x, n_id, sub_edge_index, n_sub_batch)
-    gnn = PooLedGNN("gcn", 2, 16, 16, bias=True, norm_str="none", act_str="relu", drop=0.1)
+    gnn = PooLedSubgraphGNN("gcn", 2, 16, 16, bias=True, norm_str="none", act_str="relu", drop=0.1)
     zs = []
     for sub_graph in sub_graphs:
         z = gnn(sub_graph.x[sub_graph.n_id], sub_graph.sub_edge_index, sub_graph.sub_edge_weight, sub_graph.n_sub_batch)
