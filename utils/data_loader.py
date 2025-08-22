@@ -5,12 +5,12 @@ import torch_geometric.transforms as T
 from torch_geometric.datasets import AmazonProducts, Reddit, FB15k_237, PPI, MoleculeNet
 from ogb.nodeproppred import PygNodePropPredDataset
 from utils.data_process import KGNodeInitializer
-
+from torch_geometric.loader import NeighborLoader
 
 def load_pretrain_single_graph_data(configs):
     root, data_name = configs.root, configs.data_name
     if data_name == "ogbn-arxiv":
-        dataset = PygNodePropPredDataset(root=root, name=data_name, transform = T.Compose([T.ToUndirected()]))
+        dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected()]))
         data = dataset[0]
     elif data_name == 'AmazonProducts':
         dataset = AmazonProducts(root)
@@ -45,9 +45,15 @@ def load_pretrain_multi_graph_data(configs):
 if __name__ == '__main__':
     from utils.tools import DotDict
     configs = DotDict({})
-    configs.data_name = "PPI"
+    configs.data_name = "ogbn-arxiv"
     configs.root = "../datasets"
     configs.kg_model = "transe"
     configs.kg_batch_size = 1000
     configs.kg_epochs = 500
+    configs.k_hops = 2
     data = load_pretrain_single_graph_data(configs)
+    loader = NeighborLoader(data, [10, 10], batch_size=64)
+    trans = T.RootedEgoNets(configs.k_hops)
+    for data in loader:
+        # data = trans(data)
+        continue
