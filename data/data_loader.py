@@ -7,8 +7,8 @@ from torch_geometric.data import Dataset, Data
 from torch_geometric.utils import k_hop_subgraph
 
 
-def load_pretrain_single_graph_data(configs):
-    root, data_name = configs.root, configs.data_name
+def load_pretrain_single_graph_data(configs, data_name):
+    root = configs.root
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected()]))
         data = dataset[0]
@@ -29,11 +29,12 @@ def load_pretrain_single_graph_data(configs):
         data.x = results["node_embeddings"]
     else:
         raise ValueError('Invalid data_name')
-    return data
+    dataset = EgoGraphDataset(data, configs.k_hops, configs.in_dim)
+    return dataset
 
 
-def load_pretrain_multi_graph_data(configs):
-    root, data_name = configs.root, configs.data_name
+def load_pretrain_multi_graph_data(configs, data_name):
+    root = configs.root
     if data_name == 'PPI':
         dataset = PPI(root)
     elif data_name in ["PCBA"]:
