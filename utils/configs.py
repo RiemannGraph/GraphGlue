@@ -1,6 +1,8 @@
 import json
 import os
 import argparse
+from utils.logger import create_logger
+from typing import Dict, Any, Optional
 
 
 def base_config():
@@ -12,22 +14,55 @@ def base_config():
     return config
 
 
+def save_config(config: Any, config_path: str, logger):
+    """
+    Save JSON file
 
-def load_config(config_dict, json_file: str):
-    """Load config Json/YAML file"""
-    # YAML/JSON
-    with open(json_file, 'rt') as f:
-        config_dict.update(json.load(f))
-    configs = DotDict(config_dict)
-    f.close()
-    return configs
+    Args:
+        config: config object
+        config_path: config file path
+    """
+    try:
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+        if hasattr(config, '__dict__'):
+            config_dict = config.__dict__
+        else:
+            config_dict = dict(config)
+
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=4, ensure_ascii=False)
+
+        logger.info(f"Config saved to {config_path}")
+
+    except Exception as e:
+        logger.error(f"Failed to save config to {config_path}: {str(e)}")
+        raise
 
 
-def save_config(config_dict, save_path: str):
-    with open(save_path, 'wt') as f:
-        json.dump(config_dict, f, indent=4)
-    f.close()
-    return
+def load_config(config_path: str, logger) -> Dict[str, Any]:
+    """
+    load config from JSON file
+
+    Args:
+        config_path:
+
+    Returns:
+        DotDict
+    """
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    try:
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
+
+        logger.info(f"Config loaded from {config_path}")
+        return config_dict
+
+    except Exception as e:
+        logger.error(f"Failed to load config from {config_path}: {str(e)}")
+        raise
 
 
 def list2str(l):

@@ -65,57 +65,6 @@ def load_checkpoint(checkpoint_path: str, map_location: Optional[str] = None) ->
         raise
 
 
-def save_config(config: Any, config_path: str):
-    """
-    Save JSON file
-
-    Args:
-        config: config object
-        config_path: config file path
-    """
-    try:
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-
-        if hasattr(config, '__dict__'):
-            config_dict = config.__dict__
-        else:
-            config_dict = dict(config)
-
-        with open(config_path, 'w') as f:
-            json.dump(config_dict, f, indent=4, ensure_ascii=False)
-
-        logger.info(f"Config saved to {config_path}")
-
-    except Exception as e:
-        logger.error(f"Failed to save config to {config_path}: {str(e)}")
-        raise
-
-
-def load_config(config_path: str) -> Dict[str, Any]:
-    """
-    load config from JSON file
-
-    Args:
-        config_path:
-
-    Returns:
-        DotDict
-    """
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    try:
-        with open(config_path, 'r') as f:
-            config_dict = json.load(f)
-
-        logger.info(f"Config loaded from {config_path}")
-        return config_dict
-
-    except Exception as e:
-        logger.error(f"Failed to load config from {config_path}: {str(e)}")
-        raise
-
-
 def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     """
 

@@ -12,13 +12,13 @@ import time
 
 
 class Pretrainer:
-    def __init__(self, configs):
+    def __init__(self, configs, logger=None):
         self.configs = configs
         self.pretrain_single_graph_data = configs.pretrain_single_graph_data
         self.pretrain_multi_graph_data = configs.pretrain_multi_graph_data
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = RPGraphFM(configs).to(self.device)
-        self.logger = create_logger(configs.log_path)
+        self.logger = create_logger(configs.log_path) if logger is None else logger
         self.start_epoch = 0
 
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
