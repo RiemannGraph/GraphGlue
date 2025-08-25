@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, SAGEConv
+from torch_geometric.nn import GCNConv, SAGEConv, GINConv
 
 
 CONV_MAP = {
     "gcn": GCNConv,
     "sage": SAGEConv,
+    "gin": GINConv
 }
 
 

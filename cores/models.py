@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
-from cores.layers import GNNLayer, FeedForwardLayer
-from torch_geometric.data import Data, Batch
-from cores.layers import ActivateModule, NormModule
+from torch_geometric.data import Data
+from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 
 
 class PTGB(nn.Module):
@@ -16,37 +15,26 @@ class PTGB(nn.Module):
         self.W_q = nn.Linear(d, hid_dim)
         self.W_k = nn.Linear(d, hid_dim)
 
-    def forward(self, x, n_id, sub_edge_index, n_sub_batch):
+    def forward(self, x, edge_index, edge_weight, batch, batch_size):
         N = x.shape[0]
-        weights = torch.sigmoid(self.W_q(self.generators) @ self.W_k(x).t())   # [M, N]
-        aug_sub_graphs = []
 
-        add_n_sub_batch = torch.arange(x.shape[0]).to(x.device)
-        add_n_id = torch.tensor([N] * N).long()
-        add_map_id = torch.arange(N, N + N)
-        counts = torch.bincount(n_sub_batch)
-        add_sub_edge_src = torch.repeat_interleave(add_map_id[add_n_sub_batch], counts)
-        add_edge_index = torch.stack([torch.arange(n_sub_batch.shape[0]), add_sub_edge_src], dim=0)
-        # add_edge_index = torch.concat([add_edge_index, add_edge_index[[1, 0]]], dim=-1)
-        new_sub_edge_index = torch.cat([sub_edge_index, add_edge_index], dim=-1)
-        new_n_id = torch.concat([n_id, add_n_id], dim=-1)
-        new_n_sub_batch = torch.concat([n_sub_batch, add_n_sub_batch], dim=-1)
+        weights = torch.sigmoid(self.W_q(self.generators) @ self.W_k(x).t())  # [M, N]
 
-        x_expand = x.unsqueeze(0).repeat(self.M, 1, 1)     # [M, N, d]
-        p_expand = self.generators.unsqueeze(1)     # [M, 1, d]
-        xp = torch.concat([x_expand, p_expand], dim=1)   # [M, N+1, d]
+        add_batch = torch.arange(batch_size, device=x.device)
+        new_batch = torch.concat([batch, add_batch], dim=0)
+
+        counts = torch.bincount(batch)
+        add_edge_src = torch.arange(N, N + batch_size, device=x.device).repeat_interleave(counts)
+        add_edge_dst = torch.arange(N, device=x.device)
+        add_edge_index = torch.stack([add_edge_src, add_edge_dst], dim=0)
+        new_edge_index = torch.concat([edge_index, add_edge_index], dim=-1)
+        aug_graphs = []
         for i in range(self.M):
-            add_sub_edge_weight = weights[i][n_id]
-            new_sub_edge_weight = torch.concat([torch.ones_like(sub_edge_index[0]), add_sub_edge_weight], dim=-1)
-            aug_sub_graph = Data(x=xp[i], sub_edge_index=new_sub_edge_index, sub_edge_weight=new_sub_edge_weight,
-                                 n_id=new_n_id, n_sub_batch=new_n_sub_batch)
-            aug_sub_graphs.append(aug_sub_graph)
-
-        # Additional memory cost
-        # aug_sub_graph_batch = Batch.from_data_list(aug_sub_graphs)
-        # return aug_sub_graph_batch
-
-        return aug_sub_graphs
+            xp = torch.concat([x, self.generators[i: i+1].repeat(batch_size, 1)], dim=0)
+            new_edge_weight = torch.concat([edge_weight, weights[i]], dim=-1)
+            aug_graph = Data(x=xp, edge_index=new_edge_index, edge_weight=new_edge_weight, batch=new_batch)
+            aug_graphs.append(aug_graph)
+        return aug_graphs
 
 
 class PooLedSubgraphGNN(nn.Module):
@@ -77,47 +65,75 @@ class PooLedSubgraphGNN(nn.Module):
 class RPGraphFM(nn.Module):
     def __init__(self, configs):
         super().__init__()
+        self.input_lin = FeedForwardLayer(configs.in_dim, configs.hid_dim, configs.hid_dim,
+                                          configs.bias, configs.act_str, configs.drop)
         self.ptg_bank = PTGB(configs.M, configs.d, configs.hid_dim)
         self.encoder = PooLedSubgraphGNN(configs.conv_name, configs.n_layers,
-                                         configs.in_dim, configs.hid_dim,
+                                         configs.hid_dim, configs.hid_dim,
                                          configs.normalize, configs.bias,
                                          configs.norm_str, configs.act_str, configs.drop)
-        self.extractor = T.RootedEgoNets(configs.k_hops)
         self.M = configs.M
 
-    def forward(self, graph):
+    def forward(self, graph: Data):
+        """
 
-        return
+        :param graph: 1. Feature dimension is unified. 2. BatchData
+        :return: node/graph embedding, tangent vectors [torch.Tensor, torch.Tensor]
+        """
+        x, edge_index, edge_weight, batch, batch_size = graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size
+        x = self.input_lin(x)
+        z = self.encoder(x, edge_index, edge_weight, batch)
+
+        aug_graphs = self.ptg_bank(graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size)
+        z_tan = []
+        for aug_graph in aug_graphs:
+            tan = self.encoder(aug_graph.x, aug_graph.edge_index, aug_graph.edge_weight, aug_graph.batch)
+            z_tan.append(tan)
+        z_tan = torch.stack(z_tan, dim=0)
+        return z, z_tan
 
     @staticmethod
-    def PTG_loss():
-        pass
+    def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):
+        """
+        Construct KNN graph for graph-level datasets.
+
+        :param h: All the graph representations for a graph-level dataset.
+        :param top_k: the number of K nearest neighbors.
+        :param return_weight: If True, return edge_weight, otherwise, return None.
+        :return: edge_index, edge_weight [Torch.Tensor, torch.Tensor]
+        """
+        assert top_k < h.shape[0], f"top_k={top_k} must be smaller than f{h.shape[0]}"
+        similarity = h @ h.t()
+        _, indices = similarity.topk(k=top_k, dim=-1)
+        edge_index = indices.t()
+        if return_weight:
+            edge_weight = similarity[edge_index[0], edge_index[1]]
+        else:
+            edge_weight = None
+        return edge_index, edge_weight
 
     @staticmethod
-    def node2node_loss():
-        pass
+    def parallel_translation(basis_src, basis_dst):
+        """
+        Estimation of parallel translation between two tangent spaces.
+        :param basis_src: [M, d]
+        :param basis_dst: [M, d]
+        :return: PT matrix: torch.Tensor
+        """
+        U, _, VT = torch.svd(basis_dst @ basis_src.t())
+        P = U @ VT
+        return P
 
     @staticmethod
-    def node2graph_loss():
-        pass
-
-    @staticmethod
-    def graph2graph_loss(h_graph, h_graph_aug, temperature=0.1):
-        pass
-
-
-if __name__ == '__main__':
-    import torch_geometric.transforms as T
-    x = torch.randn(5, 16)
-    edge_index = torch.tensor([[0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 3], [2, 4], [3, 2], [3, 4], [4, 2], [4, 3]]).t()
-    graph = Data(x, edge_index)
-    graph = T.RootedEgoNets(2)(graph)
-    ptgb = PTGB(2, 16, 32)
-    x, n_id, sub_edge_index, n_sub_batch = graph.x, graph.n_id, graph.sub_edge_index, graph.n_sub_batch
-    sub_graphs = ptgb(x, n_id, sub_edge_index, n_sub_batch)
-    gnn = PooLedSubgraphGNN("gcn", 2, 16, 16, bias=True, norm_str="none", act_str="relu", drop=0.1)
-    zs = []
-    for sub_graph in sub_graphs:
-        z = gnn(sub_graph.x[sub_graph.n_id], sub_graph.sub_edge_index, sub_graph.sub_edge_weight, sub_graph.n_sub_batch)
-        zs.append(z)
-    zs = torch.stack(zs, dim=0)
+    def volume_ratio(basis_src, basis_dst):
+        """
+        Volume ratio between two tangent spaces to estimate Ricci Curvature.
+        :param basis_src: [M, d]
+        :param basis_dst: [M, d]
+        :return: ratio: torch.Tensor
+        """
+        vol_src, vol_dst = torch.det(basis_src), torch.det(basis_dst)
+        vol_src_stable = torch.sqrt(vol_src ** 2 + 1e-6)
+        vol_dst_stable = torch.sqrt(vol_dst ** 2 + 1e-6)
+        r = vol_dst_stable / vol_src_stable
+        return r
