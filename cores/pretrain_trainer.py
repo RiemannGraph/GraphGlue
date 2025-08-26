@@ -6,12 +6,15 @@ from torch_geometric.loader import DataLoader, NeighborLoader
 from utils.logger import create_logger
 from utils.model_utils import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints
 import os
-from typing import List, Tuple, Optional
+from typing import List
+from torch_geometric.transforms import RootedEgoNets, Compose
+from data.data_process import RenameFromRootedEgoNets
 import time
 
 
 class Pretrainer:
     def __init__(self, configs, logger=None):
+        assert len(configs.num_neighbors) >= configs.k_hops, "number of neighbor hops are not match!"
         self.configs = configs
         self.pretrain_single_graph_data = configs.pretrain_single_graph_data
         self.pretrain_multi_graph_data = configs.pretrain_multi_graph_data
@@ -97,8 +100,8 @@ class Pretrainer:
             for batch_idx, data in enumerate(node_loader):
                 optimizer.zero_grad()
                 data = data.to(self.device)
-                z, z_tan = self.model(data)
-                intra_loss = self.model.loss(z, z_tan, data.edge_index)
+                z, z_tan = self.model(data, data.batch_graph_nums)
+                intra_loss = self.model.loss(z, z_tan, data.origin_edge_index)
                 intra_loss.backward()
                 # if self.configs.max_grad_norm > 0:
                 #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
@@ -123,7 +126,7 @@ class Pretrainer:
             for batch_idx, data in enumerate(graph_loader):
                 optimizer.zero_grad()
                 data = data.to(self.device)
-                z, z_tan = self.model(data)
+                z, z_tan = self.model(data, data.batch_size)
                 edge_index = self.model.knn_graph(z, self.configs.knn)
                 intra_loss = self.model.loss(z, z_tan, edge_index)
                 intra_loss.backward()
@@ -157,8 +160,10 @@ class Pretrainer:
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
             node_loader = NeighborLoader(data, batch_size=self.configs.batch_size,
-                                         num_neighbors=[-1] * self.configs.k_hops,
-                                         shuffle=False, num_workers=8, disjoint=True)
+                                         num_neighbors=self.configs.num_neighbors,
+                                         shuffle=False, num_workers=8, disjoint=False,
+                                         transform=Compose([RootedEgoNets(self.configs.k_hops),
+                                                            RenameFromRootedEgoNets()]))
             node_loaders.append(node_loader)
         for data_name in self.pretrain_multi_graph_data:
             dataset = load_pretrain_multi_graph_data(self.configs, data_name)

@@ -4,6 +4,7 @@ from typing import Dict, Any, Tuple, Optional
 from torch_geometric.data import Data
 from torch_geometric.nn.kge import TransE, ComplEx, DistMult, RotatE
 from torch_geometric.utils import degree, to_undirected, is_undirected
+from torch_geometric.transforms import BaseTransform
 
 
 class KGNodeInitializer:
@@ -160,10 +161,9 @@ class KGNodeInitializer:
         return results
 
 
-def search_adjacent_edges(edge_index, center_nodes=None, num_samples=None):
+def search_adjacent_edges(edge_index, num_samples=None):
     """
     :param edge_index: [2, E]
-    :param center_nodes: Only sample the paths consist of center nodes. If None, sample all the paths.
     :param num_samples: If None, return all paths. Else, return given number of paths.
     :return paths: torch.Tensor (i, j) (j, k) [N, 3]
     """
@@ -204,10 +204,6 @@ def search_adjacent_edges(edge_index, center_nodes=None, num_samples=None):
         dst[j_k_edge_idx]  # k (from j->k)
     ], dim=1)
     paths = paths[paths[:, 0] != paths[:, 2]]
-    if center_nodes is not None:
-        in_allowed = torch.isin(paths, center_nodes)  # [N, 3] bool
-        row_in_allowed = in_allowed.all(dim=1)
-        paths = paths[row_in_allowed]
 
     if num_samples is not None:
         node_degree = degree(edge_index)
@@ -226,3 +222,21 @@ def unify_feature_dimension(x, uni_dim):
     U, S, VT = torch.svd(x)
     x_reduced = S.unsqueeze(-1) * VT[: uni_dim].t()
     return x_reduced
+
+class RenameFromRootedEgoNets(BaseTransform):
+    """
+    Rename the attribute of neighbor-sampled graph from RootedEgoNets.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, ego_net_data):
+        data = Data()
+        batch_graph_nums = ego_net_data.x.shape[0]
+        data.batch_graph_nums = batch_graph_nums
+        data.x = ego_net_data.x[ego_net_data.n_id]
+        data.edge_index = ego_net_data.sub_edge_index
+        data.edge_weight = ego_net_data.edge_weight[ego_net_data.e_id]
+        data.batch = ego_net_data.n_sub_batch
+        data.origin_edge_index = ego_net_data.edge_index
+        return data

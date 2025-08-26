@@ -17,22 +17,33 @@ class PTGB(nn.Module):
         self.W_q = nn.Linear(hid_dim, att_dim)
         self.W_k = nn.Linear(hid_dim, att_dim)
 
-    def forward(self, x, edge_index, edge_weight, batch, batch_size):
+    def forward(self, x, edge_index, edge_weight, batch, batch_graph_nums):
+        """
+
+        :param x: [N, d]
+        :param edge_index: [2, E]
+        :param edge_weight: [E,]
+        :param batch: [N]
+        :param batch_graph_nums: If graph-batch, batch_nums=batch_size.
+                                If neighbor-batch, batch_nums=node_nums of sampled graph.
+
+        :return: List[Data]
+        """
         N = x.shape[0]
 
         weights = torch.sigmoid(self.W_q(self.generators) @ self.W_k(x).t())  # [M, N]
 
-        add_batch = torch.arange(batch_size, device=x.device)
+        add_batch = torch.arange(batch_graph_nums, device=x.device)
         new_batch = torch.concat([batch, add_batch], dim=0)
 
         counts = torch.bincount(batch)
-        add_edge_src = torch.arange(N, N + batch_size, device=x.device).repeat_interleave(counts)
+        add_edge_src = torch.arange(N, N + batch_graph_nums, device=x.device).repeat_interleave(counts)
         add_edge_dst = torch.arange(N, device=x.device)
         add_edge_index = torch.stack([add_edge_src, add_edge_dst], dim=0)
         new_edge_index = torch.concat([edge_index, add_edge_index], dim=-1)
         aug_graphs = []
         for i in range(self.num_generators):
-            xp = torch.concat([x, self.generators[i: i+1].repeat(batch_size, 1)], dim=0)
+            xp = torch.concat([x, self.generators[i: i + 1].repeat(batch_graph_nums, 1)], dim=0)
             new_edge_weight = torch.concat([edge_weight, weights[i]], dim=-1)
             aug_graph = Data(x=xp, edge_index=new_edge_index, edge_weight=new_edge_weight, batch=new_batch)
             aug_graphs.append(aug_graph)
@@ -81,17 +92,26 @@ class RPGraphFM(nn.Module):
         self.geo_loss = GeometricPersistLoss(configs.regular_coef)
         self._is_global_representation_registered = False
 
-    def forward(self, graph: Data):
+    def forward(self, graph: Data, batch_graph_nums: int = None):
         """
 
-        :param graph: 1. Feature dimension is unified. 2. BatchData
+        :param graph: 1) Feature dimension is unified. 2) BatchData
+        :param batch_graph_nums: If graph-batch, batch_nums=batch_size.
+                                If neighbor-batch, batch_nums=node_nums of sampled subgraph.
+
         :return: node/graph embedding, tangent vectors [torch.Tensor, torch.Tensor] with shape [N, d] [N, M, d]
         """
-        x, edge_index, edge_weight, batch, batch_size = graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size
+        if batch_graph_nums is None:
+            if hasattr(graph, "batch_graph_nums"):
+                batch_graph_nums = graph.batch_graph_nums
+            else:
+                batch_graph_nums = graph.batch_size
+
+        x, edge_index, edge_weight, batch = graph.x, graph.edge_index, graph.edge_weight, graph.batch
         x = self.input_lin(x)
         z = self.encoder(x, edge_index, edge_weight, batch)
 
-        aug_graphs = self.ptg_bank(graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size)
+        aug_graphs = self.ptg_bank(graph.x, graph.edge_index, graph.edge_weight, graph.batch, batch_graph_nums)
         z_tan = []
         for aug_graph in aug_graphs:
             tan = self.encoder(aug_graph.x, aug_graph.edge_index, aug_graph.edge_weight, aug_graph.batch)
@@ -105,6 +125,7 @@ class RPGraphFM(nn.Module):
         :param z: [N, d]
         :param z_tan: [N, M, d]
         :param edge_index: [2, E]
+
         :return: loss for each graph batch or all datasets
         """
         ptg_loss = self.ptg_loss(z, z_tan)
@@ -152,6 +173,7 @@ class RPGraphFM(nn.Module):
         :param h: All the graph representations for a graph-level dataset.
         :param top_k: the number of K nearest neighbors.
         :param return_weight: If True, return edge_weight, otherwise, return None.
+
         :return: edge_index, edge_weight [Torch.Tensor, torch.Tensor]
         """
         assert top_k < h.shape[0], f"top_k={top_k} must be smaller than f{h.shape[0]}"
@@ -170,6 +192,7 @@ class RPGraphFM(nn.Module):
         Estimation of parallel translation between two tangent spaces.
         :param basis_src: [*, M, d]
         :param basis_dst: [*, M, d]
+
         :return: PT matrix: torch.Tensor
         """
 
@@ -183,6 +206,7 @@ class RPGraphFM(nn.Module):
         Volume ratio between two tangent spaces to estimate Ricci Curvature.
         :param basis_src: [*, M, d]
         :param basis_dst: [*, M, d]
+
         :return: log ratio: torch.Tensor
         """
         vol_src, vol_dst = torch.det(basis_src.t() @ basis_src), torch.det(basis_dst.t() @ basis_dst)
