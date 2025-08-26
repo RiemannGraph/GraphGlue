@@ -1,10 +1,20 @@
-import torch
-import numpy as np
-import argparse
-from utils.tools import set_seed
-from utils.configs import base_config
+# main.py
 
+import sys
+from utils.configs import parse_config
+from cores.pretrain_trainer import Pretrainer
 
-set_seed(3047)
-config = base_config()
+def main():
+    config = parse_config()
 
+    # 可选：打印配置
+    print("✅ Final Configuration:")
+    for k, v in config.__dict__.items():
+        print(f"  {k}: {v}")
+
+    # 创建 trainer 并训练
+    trainer = Pretrainer(config)
+    trainer.train()
+
+if __name__ == '__main__':
+    main()

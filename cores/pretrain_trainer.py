@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from cores.models import RPGraphFM
 from data.data_loader import load_pretrain_single_graph_data, load_pretrain_multi_graph_data
 from torch_geometric.loader import DataLoader, NeighborLoader
@@ -38,9 +37,22 @@ class Pretrainer:
             eta_min=self.configs.lr_pretrain * 0.01
         )
 
+        # Resume checkpoint if you want
         if self.configs.resume_checkpoint:
             latest_check_path = get_latest_checkpoint(self.configs.checkpoint_dir)
-            self._load_checkpoint(latest_check_path, optimizer, scheduler)
+            if latest_check_path:
+                self.start_epoch = load_checkpoint(
+                    filepath=latest_check_path,
+                    model=self.model,
+                    optimizer=optimizer,
+                    scheduler=scheduler
+                )
+                self.logger.info(f"Resumed training from epoch {self.start_epoch}")
+            else:
+                self.start_epoch = 0
+                self.logger.info("No checkpoint found. Start from scratch.")
+        else:
+            self.start_epoch = 0
 
         node_loaders, graph_loaders = self._get_loaders()
 
@@ -64,14 +76,17 @@ class Pretrainer:
                     self.configs.checkpoint_dir,
                     f'pretrain_epoch_{epoch + 1}.pth'
                 )
-                save_checkpoint({
-                    'epoch': epoch + 1,
-                    'state_dict': self.model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'scheduler': scheduler.state_dict(),
-                    'config': self.configs.__dict__,
-                }, checkpoint_path)
-                self.logger.info(f'Saved checkpoint: {checkpoint_path}')
+                save_checkpoint(
+                    model=self.model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    epoch=epoch + 1,
+                    config=self.configs.__dict__,
+                    filepath=checkpoint_path
+                )
+
+                # Optional
+                cleanup_old_checkpoints(self.configs.checkpoint_dir, keep_last=5)
 
             if (epoch + 1) == self.configs.pretrain_epochs:
                 final_model_path = os.path.join(
@@ -170,16 +185,3 @@ class Pretrainer:
             graph_loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=False, num_workers=8)
             graph_loaders.append(graph_loader)
         return node_loaders, graph_loaders
-
-    def _load_checkpoint(self, checkpoint_path, optimizer=None, scheduler=None):
-        try:
-            checkpoint = load_checkpoint(checkpoint_path)
-            self.model.load_state_dict(checkpoint['state_dict'])
-            if optimizer is not None:
-                optimizer.load_state_dict(checkpoint['optimizer'])
-            if scheduler is not None and 'scheduler' in checkpoint:
-                scheduler.load_state_dict(checkpoint['scheduler'])
-            self.start_epoch = checkpoint['epoch']
-            self.logger.info(f"Loaded checkpoint from epoch {self.start_epoch}")
-        except Exception as e:
-            self.logger.warning(f"Failed to load checkpoint: {str(e)}. Starting from scratch.")
