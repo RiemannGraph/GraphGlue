@@ -100,6 +100,14 @@ class RPGraphFM(nn.Module):
         self.register_buffer("global_tan", h_tan.mean(dim=1))
         self._is_global_representation_registered = True
 
+    def frozen(self):
+        for param in self.parameters():
+            param.requires_grad_(False)
+
+    def unfrozen(self):
+        for param in self.parameters():
+            param.requires_grad_(True)
+
     @property
     def is_global_representation_registered(self):
         return self._is_global_representation_registered
