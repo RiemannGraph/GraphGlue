@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sympy.physics.units.systems.si import dimex
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
