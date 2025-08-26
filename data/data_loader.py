@@ -2,9 +2,9 @@ import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import AmazonProducts, Reddit, FB15k_237, PPI, MoleculeNet
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_process import KGNodeInitializer
-from torch_geometric.data import Dataset, Data
-from torch_geometric.utils import k_hop_subgraph
+from data.data_process import KGNodeInitializer, unify_feature_dimension
+from torch_geometric.data import Dataset
+from torch_geometric.utils import to_undirected
 
 
 def load_pretrain_single_graph_data(configs, data_name):
@@ -24,13 +24,16 @@ def load_pretrain_single_graph_data(configs, data_name):
         valid_data = FB15k_237(root, split='val')[0]
         test_data = FB15k_237(root, split='test')[0]
         model = KGNodeInitializer(configs.kg_model, device=device)
-        results = model.fit(train_data, valid_data, test_data, configs.kg_batch_size, configs.kg_epochs, verbose=True)
+        results = model.fit(train_data, valid_data, test_data, configs.in_dim, configs.kg_batch_size, configs.kg_epochs, verbose=True)
         data = FB15k_237(root, split='train')[0]
         data.x = results["node_embeddings"]
     else:
         raise ValueError('Invalid data_name')
-    dataset = EgoGraphDataset(data, configs.k_hops, configs.in_dim)
-    return dataset
+    data.x = unify_feature_dimension(data.x, configs.in_dim)
+    if not hasattr(data, "edge_weight"):
+        data.edge_weight = torch.ones_like(data.edge_index[0])
+    data.edge_index, data.edge_weight = to_undirected(data.edge_index, data.edge_weight, num_nodes=data.num_nodes)
+    return data
 
 
 def load_pretrain_multi_graph_data(configs, data_name):
@@ -41,38 +44,27 @@ def load_pretrain_multi_graph_data(configs, data_name):
         dataset = MoleculeNet(root, name=data_name)
     else:
         raise ValueError('Invalid data_name')
+    dataset = GraphDataset(dataset)
     return dataset
 
 
-class EgoGraphDataset(Dataset):
-    def __init__(self, data: Data, k_hops, in_dim=128):
-        super(EgoGraphDataset, self).__init__()
-        assert data.num_features >= in_dim, f"hid_dim={in_dim} is too large!"
-        self.k_hops = k_hops
-        self.in_dim = in_dim
-        self.num_nodes = data.num_nodes
-        self.global_edge_index = data.edge_index
-        data = self.dim_reduce(data)
-        self.data = data
+class GraphDataset(Dataset):
+    def __init__(self, dataset: Dataset, in_dim=128):
+        """
 
-    def dim_reduce(self, data):
-        U, S, VT = torch.svd(data.x)
-        x_reduced = S.unsqueeze(-1) * VT[: self.in_dim].t()
-        data.x = x_reduced
-        return data
+        :param dataset: Graph-level dataset
+        :param in_dim: the unified dimension of features as inputs
+        """
+        super(GraphDataset, self).__init__()
+        self.in_dim = in_dim
+        self.dataset = dataset
 
     def len(self):
-        return self.num_nodes
+        return len(self.dataset)
 
     def get(self, idx):
-        subset, edge_index, mapping, _ = k_hop_subgraph(
-            idx, self.k_hops, self.data.edge_index, relabel_nodes=True
-        )
-
-        return Data(
-            x=self.data.x[subset],
-            edge_index=edge_index,
-            edge_weight=torch.ones_like(edge_index[0]),
-            mapping=mapping,
-            subset=subset
-        )
+        data = self.dataset[idx]
+        data.x = unify_feature_dimension(data.x, self.in_dim)
+        if not hasattr(data, "edge_weight"):
+            data.edge_weight = torch.ones_like(data.edge_index[0])
+        return data

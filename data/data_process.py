@@ -1,9 +1,9 @@
-from torch_geometric.nn.kge import TransE, ComplEx, DistMult, RotatE
 import torch
-import torch.nn.functional as F
 import torch.optim as optim
 from typing import Dict, Any, Tuple, Optional
 from torch_geometric.data import Data
+from torch_geometric.nn.kge import TransE, ComplEx, DistMult, RotatE
+from torch_geometric.utils import to_torch_csc_tensor
 
 
 class KGNodeInitializer:
@@ -108,31 +108,19 @@ class KGNodeInitializer:
     def fit(
             self,
             train_data: Data,
-            valid_data: Optional[Data] = None,
-            test_data: Optional[Data] = None,
+            valid_data: Data,
+            test_data: Data,
+            hid_channels: int,
             batch_size: int = 1024,
             epochs: int = 500,
             eval_interval: int = 25,
             verbose: bool = True
     ) -> Dict[str, Any]:
-        """
-
-        Args:
-            train_data:
-            valid_data:
-            test_data:
-            batch_size:
-            epochs:
-            eval_interval:
-            verbose:
-
-        Returns:
-
-        """
         self.setup_model(
             num_nodes=train_data.num_nodes,
             num_relations=train_data.num_edge_types if hasattr(train_data, 'num_edge_types')
-            else train_data.edge_type.max().item() + 1
+            else train_data.edge_type.max().item() + 1,
+            hidden_channels=hid_channels
         )
 
         train_data = train_data.to(self.device)
@@ -170,3 +158,52 @@ class KGNodeInitializer:
         results['relation_embeddings'] = self.get_relation_embeddings()
 
         return results
+
+
+def search_adjacent_edges(edge_index):
+    """
+    :param edge_index: [2, E]
+    :return paths: torch.Tensor (i, j) (j, k) [N, 3]
+    """
+    device = edge_index.device
+
+    src = edge_index[0]  # i
+    dst = edge_index[1]  # j
+
+    sorted_dst, dst_perm = torch.sort(dst)
+    sorted_src, src_perm = torch.sort(src)
+
+    left_idx = torch.searchsorted(sorted_src, sorted_dst, side='left')
+    right_idx = torch.searchsorted(sorted_src, sorted_dst, side='right')
+    match_counts = right_idx - left_idx
+    total_matches = match_counts.sum()
+
+    if total_matches == 0:
+        return torch.empty((0, 3), dtype=torch.long, device=device)
+
+    cum_match_counts = torch.cat([torch.zeros(1, dtype=torch.long, device=device),
+                                  torch.cumsum(match_counts, 0)])
+    dst_indices_repeated = torch.arange(len(sorted_dst), device=device).repeat_interleave(match_counts)
+
+    base_indices = torch.arange(total_matches, device=device)
+    group_id = torch.searchsorted(cum_match_counts[1:], base_indices, right=True)
+    group_start = cum_match_counts[group_id]
+    offset = base_indices - group_start
+    src_indices = left_idx[group_id] + offset
+
+    i_j_edge_idx = dst_perm[dst_indices_repeated]  # i->j
+    j_k_edge_idx = src_perm[src_indices]  # j->k
+
+    paths = torch.stack([
+        src[i_j_edge_idx],  # i (from i->j)
+        dst[i_j_edge_idx],  # j (from i->j)
+        dst[j_k_edge_idx]  # k (from j->k)
+    ], dim=1)
+    paths = paths[paths[:, 0] != paths[:, 2]]
+    return paths
+
+
+def unify_feature_dimension(x, uni_dim):
+    U, S, VT = torch.svd(x)
+    x_reduced = S.unsqueeze(-1) * VT[: uni_dim].t()
+    return x_reduced
