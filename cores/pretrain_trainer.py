@@ -101,7 +101,7 @@ class Pretrainer:
                 optimizer.zero_grad()
                 data = data.to(self.device)
                 z, z_tan = self.model(data, data.batch_graph_nums)
-                intra_loss = self.model.loss(z, z_tan, data.origin_edge_index)
+                intra_loss = self.model.loss(z, z_tan, data.origin_edge_index, data.batch_size)
                 intra_loss.backward()
                 # if self.configs.max_grad_norm > 0:
                 #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)

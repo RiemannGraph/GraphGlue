@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -119,18 +121,16 @@ class RPGraphFM(nn.Module):
         z_tan = torch.stack(z_tan, dim=1)
         return z, z_tan
 
-    def loss(self, z, z_tan, edge_index):
+    def loss(self, z, z_tan, edge_index, batch_size: Optional[int] = None):
         """
 
         :param z: [N, d]
         :param z_tan: [N, M, d]
         :param edge_index: [2, E]
+        :param batch_size: If not None, meaning that we only consider center nodes in contrastive loss
 
         :return: loss for each graph batch or all datasets
         """
-        ptg_loss = self.ptg_loss(z, z_tan)
-        cl_loss = self.contra_loss(z, z_tan)
-
         triple = search_adjacent_edges(edge_index, self.num_samples)
         vi, vj, vk = triple[0], triple[1], triple[2]
         z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
@@ -145,6 +145,12 @@ class RPGraphFM(nn.Module):
         log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk, log_r_matrix_ik], dim=0)  # [3, T]
 
         geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
+
+        if batch_size is not None:
+            z = z[:batch_size]
+            z_tan = z_tan[:batch_size]
+        ptg_loss = self.ptg_loss(z, z_tan)
+        cl_loss = self.contra_loss(z, z_tan)
 
         return ptg_loss + cl_loss + geo_loss
 

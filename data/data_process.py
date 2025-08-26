@@ -223,6 +223,7 @@ def unify_feature_dimension(x, uni_dim):
     x_reduced = S.unsqueeze(-1) * VT[: uni_dim].t()
     return x_reduced
 
+
 class RenameFromRootedEgoNets(BaseTransform):
     """
     Rename the attribute of neighbor-sampled graph from RootedEgoNets.
