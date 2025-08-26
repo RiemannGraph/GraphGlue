@@ -4,7 +4,7 @@ from cores.models import RPGraphFM
 from data.data_loader import load_pretrain_single_graph_data, load_pretrain_multi_graph_data
 from torch_geometric.loader import DataLoader, NeighborLoader
 from utils.logger import create_logger
-from utils.model_utils import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints
+from utils.checkpoints import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints
 import os
 from typing import List
 from torch_geometric.transforms import RootedEgoNets, Compose
