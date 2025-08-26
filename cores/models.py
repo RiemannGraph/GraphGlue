@@ -4,16 +4,17 @@ import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
+from cores.loss_funcs import PTGBLoss, ContrastiveLoss
 
 
 class PTGB(nn.Module):
-    def __init__(self, M, d, hid_dim):
+    def __init__(self, num_generators, hid_dim, att_dim):
         super(PTGB, self).__init__()
-        self.M = M
-        self.generators = nn.Parameter(torch.empty(M, d))
+        self.num_generators = num_generators
+        self.generators = nn.Parameter(torch.empty(num_generators, hid_dim))
         nn.init.kaiming_normal_(self.generators.data)
-        self.W_q = nn.Linear(d, hid_dim)
-        self.W_k = nn.Linear(d, hid_dim)
+        self.W_q = nn.Linear(hid_dim, att_dim)
+        self.W_k = nn.Linear(hid_dim, att_dim)
 
     def forward(self, x, edge_index, edge_weight, batch, batch_size):
         N = x.shape[0]
@@ -29,7 +30,7 @@ class PTGB(nn.Module):
         add_edge_index = torch.stack([add_edge_src, add_edge_dst], dim=0)
         new_edge_index = torch.concat([edge_index, add_edge_index], dim=-1)
         aug_graphs = []
-        for i in range(self.M):
+        for i in range(self.num_generators):
             xp = torch.concat([x, self.generators[i: i+1].repeat(batch_size, 1)], dim=0)
             new_edge_weight = torch.concat([edge_weight, weights[i]], dim=-1)
             aug_graph = Data(x=xp, edge_index=new_edge_index, edge_weight=new_edge_weight, batch=new_batch)
@@ -67,12 +68,13 @@ class RPGraphFM(nn.Module):
         super().__init__()
         self.input_lin = FeedForwardLayer(configs.in_dim, configs.hid_dim, configs.hid_dim,
                                           configs.bias, configs.act_str, configs.drop)
-        self.ptg_bank = PTGB(configs.M, configs.d, configs.hid_dim)
+        self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
         self.encoder = PooLedSubgraphGNN(configs.conv_name, configs.n_layers,
                                          configs.hid_dim, configs.hid_dim,
                                          configs.normalize, configs.bias,
                                          configs.norm_str, configs.act_str, configs.drop)
-        self.M = configs.M
+        self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
+        self.contra_loss = ContrastiveLoss(configs.temperature)
 
     def forward(self, graph: Data):
         """

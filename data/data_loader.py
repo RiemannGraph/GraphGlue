@@ -51,6 +51,7 @@ class EgoGraphDataset(Dataset):
         self.k_hops = k_hops
         self.in_dim = in_dim
         self.num_nodes = data.num_nodes
+        self.global_edge_index = data.edge_index
         data = self.dim_reduce(data)
         self.data = data
 
@@ -60,10 +61,10 @@ class EgoGraphDataset(Dataset):
         data.x = x_reduced
         return data
 
-    def __len__(self):
+    def len(self):
         return self.num_nodes
 
-    def __getitem__(self, idx):
+    def get(self, idx):
         subset, edge_index, mapping, _ = k_hop_subgraph(
             idx, self.k_hops, self.data.edge_index, relabel_nodes=True
         )
@@ -72,5 +73,6 @@ class EgoGraphDataset(Dataset):
             x=self.data.x[subset],
             edge_index=edge_index,
             edge_weight=torch.ones_like(edge_index[0]),
-            center_node_idx=subset[mapping]
+            mapping=mapping,
+            subset=subset
         )
