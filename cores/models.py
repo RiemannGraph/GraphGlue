@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sympy.physics.units.systems.si import dimex
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
@@ -75,6 +76,7 @@ class RPGraphFM(nn.Module):
                                          configs.norm_str, configs.act_str, configs.drop)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
+        self._is_global_representation_registered = False
 
     def forward(self, graph: Data):
         """
@@ -93,6 +95,15 @@ class RPGraphFM(nn.Module):
             z_tan.append(tan)
         z_tan = torch.stack(z_tan, dim=0)
         return z, z_tan
+
+    def register_global_representation(self, h, h_tan):
+        self.register_buffer('source_knowledge', h)
+        self.register_buffer("global_tan", h_tan.mean(dim=1))
+        self._is_global_representation_registered = True
+
+    @property
+    def is_global_representation_registered(self):
+        return self._is_global_representation_registered
 
     @staticmethod
     def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):
