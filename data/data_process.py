@@ -3,7 +3,7 @@ import torch.optim as optim
 from typing import Dict, Any, Tuple, Optional
 from torch_geometric.data import Data
 from torch_geometric.nn.kge import TransE, ComplEx, DistMult, RotatE
-from torch_geometric.utils import to_torch_csc_tensor
+from torch_geometric.utils import degree, to_undirected, is_undirected
 
 
 class KGNodeInitializer:
@@ -160,11 +160,15 @@ class KGNodeInitializer:
         return results
 
 
-def search_adjacent_edges(edge_index):
+def search_adjacent_edges(edge_index, center_nodes=None, num_samples=None):
     """
     :param edge_index: [2, E]
+    :param center_nodes: Only sample the paths consist of center nodes. If None, sample all the paths.
+    :param num_samples: If None, return all paths. Else, return given number of paths.
     :return paths: torch.Tensor (i, j) (j, k) [N, 3]
     """
+    if not is_undirected(edge_index):
+        edge_index = to_undirected(edge_index)
     device = edge_index.device
 
     src = edge_index[0]  # i
@@ -200,7 +204,22 @@ def search_adjacent_edges(edge_index):
         dst[j_k_edge_idx]  # k (from j->k)
     ], dim=1)
     paths = paths[paths[:, 0] != paths[:, 2]]
-    return paths
+    if center_nodes is not None:
+        in_allowed = torch.isin(paths, center_nodes)  # [N, 3] bool
+        row_in_allowed = in_allowed.all(dim=1)
+        paths = paths[row_in_allowed]
+
+    if num_samples is not None:
+        node_degree = degree(edge_index)
+        j_deg = node_degree[paths[:, 1]]
+        i_deg = node_degree[paths[:, 0]]
+        k_deg = node_degree[paths[:, 2]]
+        scores = (i_deg + j_deg + k_deg)
+        prob = scores / scores.sum()
+        sampled_idx = torch.multinomial(prob, num_samples, replacement=False)
+        paths = paths[sampled_idx]
+
+    return paths.t().contiguous()
 
 
 def unify_feature_dimension(x, uni_dim):

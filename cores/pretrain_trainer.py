@@ -82,9 +82,8 @@ class Pretrainer:
                 }, final_model_path)
                 self.logger.info(f'Saved final model: {final_model_path}')
 
-    def _train_epoch(self, optimizer, node_loaders: List[DataLoader], graph_loaders: List[DataLoader], epoch):
+    def _train_epoch(self, optimizer, node_loaders: List[NeighborLoader], graph_loaders: List[DataLoader], epoch):
         self.model.train()
-        loss_manager = LossManager()
         total_loss = 0.0
         total_batches = 0
 
@@ -99,14 +98,14 @@ class Pretrainer:
                 optimizer.zero_grad()
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
-                intra_loss = loss_manager.intra_loss(z, z_tan) + loss_manager.geometric_loss(z, z_tan)
+                intra_loss = self.model.loss(z, z_tan, data.edge_index)
                 intra_loss.backward()
                 # if self.configs.max_grad_norm > 0:
                 #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
                 optimizer.step()
 
                 g_rep = torch.concat([g_rep, z.cpu()], dim=0)
-                g_rep_tan = torch.concat([g_rep_tan, z_tan.cpu()], dim=1)
+                g_rep_tan = torch.concat([g_rep_tan, z_tan.cpu()], dim=0)
 
                 total_loss += intra_loss.item()
                 total_batches += 1
@@ -117,7 +116,7 @@ class Pretrainer:
                     )
 
             all_graph_embeds.append(g_rep.mean(dim=0, keepdim=True))
-            all_graph_tans.append(g_rep_tan.mean(dim=1, keepdim=True))
+            all_graph_tans.append(g_rep_tan.mean(dim=0, keepdim=True))
 
         for loader_idx, graph_loader in enumerate(graph_loaders):
             self.logger.info(f'Processing graph loader {loader_idx + 1}/{len(graph_loaders)}')
@@ -125,7 +124,8 @@ class Pretrainer:
                 optimizer.zero_grad()
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
-                intra_loss = loss_manager.intra_loss(z, z_tan) + loss_manager.geometric_loss(z, z_tan)
+                edge_index = self.model.knn_graph(z, self.configs.knn)
+                intra_loss = self.model.loss(z, z_tan, edge_index)
                 intra_loss.backward()
                 # if self.configs.max_grad_norm > 0:
                 #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
@@ -138,8 +138,9 @@ class Pretrainer:
 
         optimizer.zero_grad()
         all_graph_embeds = torch.concat(all_graph_embeds, dim=0).to(self.device)
-        all_graph_tans = torch.concat(all_graph_tans, dim=1).to(self.device)
-        inter_loss = loss_manager.inter_loss(all_graph_embeds, all_graph_tans)
+        all_graph_tans = torch.concat(all_graph_tans, dim=0).to(self.device)
+        edge_index = self.model.knn_graph(all_graph_embeds, self.configs.knn)
+        inter_loss = self.model.loss(all_graph_embeds, all_graph_tans, edge_index)
         inter_loss.backward()
         # if self.configs.max_grad_norm > 0:
         #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)

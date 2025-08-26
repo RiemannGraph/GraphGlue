@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
-from cores.loss_funcs import PTGBLoss, ContrastiveLoss
+from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
+from data.data_process import search_adjacent_edges
 
 
 class PTGB(nn.Module):
@@ -66,6 +67,8 @@ class PooLedSubgraphGNN(nn.Module):
 class RPGraphFM(nn.Module):
     def __init__(self, configs):
         super().__init__()
+        self.num_samples = configs.num_samples
+        self.num_generators = configs.num_gerenators
         self.input_lin = FeedForwardLayer(configs.in_dim, configs.hid_dim, configs.hid_dim,
                                           configs.bias, configs.act_str, configs.drop)
         self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
@@ -75,13 +78,14 @@ class RPGraphFM(nn.Module):
                                          configs.norm_str, configs.act_str, configs.drop)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
+        self.geo_loss = GeometricPersistLoss(configs.regular_coef)
         self._is_global_representation_registered = False
 
     def forward(self, graph: Data):
         """
 
         :param graph: 1. Feature dimension is unified. 2. BatchData
-        :return: node/graph embedding, tangent vectors [torch.Tensor, torch.Tensor]
+        :return: node/graph embedding, tangent vectors [torch.Tensor, torch.Tensor] with shape [N, d] [N, M, d]
         """
         x, edge_index, edge_weight, batch, batch_size = graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size
         x = self.input_lin(x)
@@ -92,12 +96,40 @@ class RPGraphFM(nn.Module):
         for aug_graph in aug_graphs:
             tan = self.encoder(aug_graph.x, aug_graph.edge_index, aug_graph.edge_weight, aug_graph.batch)
             z_tan.append(tan)
-        z_tan = torch.stack(z_tan, dim=0)
+        z_tan = torch.stack(z_tan, dim=1)
         return z, z_tan
+
+    def loss(self, z, z_tan, edge_index):
+        """
+
+        :param z: [N, d]
+        :param z_tan: [N, M, d]
+        :param edge_index: [2, E]
+        :return: loss for each graph batch or all datasets
+        """
+        ptg_loss = self.ptg_loss(z, z_tan)
+        cl_loss = self.contra_loss(z, z_tan)
+
+        triple = search_adjacent_edges(edge_index, self.num_samples)
+        vi, vj, vk = triple[0], triple[1], triple[2]
+        z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
+        pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
+        pt_matrix_jk = self.parallel_translation(z_tan_j, z_tan_k)
+        pt_matrix_ik = self.parallel_translation(z_tan_i, z_tan_k)
+        pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
+
+        log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T, d, d]
+        log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
+        log_r_matrix_ik = self.log_volume_ratio(z_tan_i, z_tan_k)
+        log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk, log_r_matrix_ik], dim=0)  # [3, T]
+
+        geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
+
+        return ptg_loss + cl_loss + geo_loss
 
     def register_global_representation(self, h, h_tan):
         self.register_buffer('source_knowledge', h)
-        self.register_buffer("global_tan", h_tan.mean(dim=1))
+        self.register_buffer("global_tan", h_tan.mean(dim=0))
         self._is_global_representation_registered = True
 
     def frozen(self):
@@ -136,24 +168,25 @@ class RPGraphFM(nn.Module):
     def parallel_translation(basis_src, basis_dst):
         """
         Estimation of parallel translation between two tangent spaces.
-        :param basis_src: [M, d]
-        :param basis_dst: [M, d]
+        :param basis_src: [*, M, d]
+        :param basis_dst: [*, M, d]
         :return: PT matrix: torch.Tensor
         """
+
         U, _, VT = torch.svd(basis_dst @ basis_src.t())
         P = U @ VT
         return P
 
     @staticmethod
-    def volume_ratio(basis_src, basis_dst):
+    def log_volume_ratio(basis_src, basis_dst):
         """
         Volume ratio between two tangent spaces to estimate Ricci Curvature.
-        :param basis_src: [M, d]
-        :param basis_dst: [M, d]
-        :return: ratio: torch.Tensor
+        :param basis_src: [*, M, d]
+        :param basis_dst: [*, M, d]
+        :return: log ratio: torch.Tensor
         """
-        vol_src, vol_dst = torch.det(basis_src), torch.det(basis_dst)
-        vol_src_stable = torch.sqrt(vol_src ** 2 + 1e-6)
-        vol_dst_stable = torch.sqrt(vol_dst ** 2 + 1e-6)
-        r = vol_dst_stable / vol_src_stable
-        return r
+        vol_src, vol_dst = torch.det(basis_src.t() @ basis_src), torch.det(basis_dst.t() @ basis_dst)
+        abs_vol_src_stable = torch.sqrt(vol_src ** 2 + 1e-6)
+        abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + 1e-6)
+        log_r = torch.log(abs_vol_dst_stable) - torch.log(abs_vol_src_stable)
+        return log_r

@@ -13,11 +13,10 @@ if __name__ == '__main__':
     edge_index = torch.tensor([[0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 3], [2, 4], [3, 2], [3, 4], [4, 2], [4, 3]]).t().contiguous()
     graph = Data(x, edge_index, edge_weight=torch.ones_like(edge_index[0]))
     graph.x = unify_feature_dimension(graph.x, 8)
-    paths = search_adjacent_edges(edge_index)
-    loader = NeighborLoader(graph, batch_size=2, shuffle=False, num_neighbors=[-1], disjoint=True)
+    loader = NeighborLoader(graph, batch_size=3, shuffle=False, num_neighbors=[-1], disjoint=True)
     z_tans = []
     for graph in loader:
-        global_edge_index = torch.stack([graph.n_id[graph.edge_index[0]], graph.n_id[graph.edge_index[1]]], dim=0)
+        paths = search_adjacent_edges(graph.edge_index, torch.arange(graph.batch_size))
         aug_graphs = ptgb(graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size)
         z_tan = []
         for aug_graph in aug_graphs:
