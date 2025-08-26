@@ -40,7 +40,7 @@ class Pretrainer:
 
         if self.configs.resume_checkpoint:
             latest_check_path = get_latest_checkpoint(self.configs.checkpoint_dir)
-            self._load_checkpoint(latest_check_path)
+            self._load_checkpoint(latest_check_path, optimizer, scheduler)
 
         node_loaders, graph_loaders = self._get_loaders()
 
