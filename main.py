@@ -1,5 +1,4 @@
-import sys
-from utils.configs import parse_config
+from cores.configs import parse_config
 from cores.pretrain_trainer import Pretrainer
 
 def main():
