@@ -20,9 +20,9 @@ def load_pretrain_single_graph_data(configs, data_name):
         data = dataset[0]
     elif data_name == 'FB15k_237':
         device = torch.device('cuda')
-        train_data = FB15k_237(root, split='train')[0]
-        valid_data = FB15k_237(root, split='val')[0]
-        test_data = FB15k_237(root, split='test')[0]
+        train_data = FB15k_237(f"{root}/{data_name}", split='train')[0]
+        valid_data = FB15k_237(f"{root}/{data_name}", split='val')[0]
+        test_data = FB15k_237(f"{root}/{data_name}", split='test')[0]
         model = KGNodeInitializer(configs.kg_model, device=device)
         results = model.fit(train_data, valid_data, test_data, configs.in_dim, configs.kg_batch_size, configs.kg_epochs, verbose=True)
         data = FB15k_237(root, split='train')[0]
