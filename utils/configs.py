@@ -54,9 +54,9 @@ def get_config_parser():
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
     parser.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
+                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237", "PPI"],
                         help='node-level pretraining datasets')
-    parser.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PPI", "PCBA"],
+    parser.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
                         help='graph-level pretraining datasets')
     parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size for data loading')
