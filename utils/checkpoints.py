@@ -10,9 +10,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TrainerCheckpoint:
-    """
-    标准化的训练检查点数据结构
-    """
     epoch: int
     state_dict: Dict[str, Any]
     optimizer: Dict[str, Any]
@@ -20,7 +17,6 @@ class TrainerCheckpoint:
     config: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
-        """转换为可序列化的字典"""
         return {
             'epoch': self.epoch,
             'state_dict': self.state_dict,
@@ -31,7 +27,6 @@ class TrainerCheckpoint:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TrainerCheckpoint':
-        """从字典构建 TrainerCheckpoint，自动校验必要字段"""
         missing = []
         for field in ['epoch', 'state_dict', 'optimizer', 'scheduler', 'config']:
             if field not in data:
@@ -59,22 +54,19 @@ def save_checkpoint(
     is_best: bool = False
 ):
     """
-    保存训练检查点
 
     Args:
-        model: 模型
-        optimizer: 优化器
-        scheduler: 学习率调度器
-        epoch: 当前训练轮数（从1开始或0开始均可）
-        config: 配置对象的 __dict__
-        filepath: 保存路径
-        is_best: 是否是当前最佳模型
+        model:
+        optimizer:
+        scheduler:
+        epoch:
+        config:  object.__dict__
+        filepath: save file
+        is_best:
     """
     try:
-        # 确保目录存在
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
 
-        # 构建标准 checkpoint
         ckpt = TrainerCheckpoint(
             epoch=epoch,
             state_dict=model.state_dict(),
@@ -104,22 +96,21 @@ def load_checkpoint(
     map_location: Optional[str] = None
 ) -> int:
     """
-    加载训练检查点并恢复状态
 
     Args:
-        filepath: 检查点文件路径
-        model: 模型对象
-        optimizer: 优化器对象（可选）
-        scheduler: 调度器对象（可选）
-        map_location: 设备映射，如 'cpu', 'cuda'
+        filepath: checkpoint file path
+        model: model object
+        optimizer:
+        scheduler:
+        map_location: 'cpu' or 'cuda'
 
     Returns:
-        int: 恢复的 epoch（可用于设置 start_epoch）
+        int: resume epoch (start_epoch)
 
     Raises:
-        FileNotFoundError: 文件不存在
-        KeyError: 结构不完整
-        Exception: 其他加载错误
+        FileNotFoundError: File not found
+        KeyError: the state_dicts are missing.
+        Exception: other error
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Checkpoint file not found: {filepath}")
@@ -131,13 +122,10 @@ def load_checkpoint(
         checkpoint_dict = torch.load(filepath, map_location=map_location)
         logger.info(f"Checkpoint loaded from {filepath}")
 
-        # 使用 TrainerCheckpoint 进行结构校验
         ckpt = TrainerCheckpoint.from_dict(checkpoint_dict)
 
-        # 恢复模型
         model.load_state_dict(ckpt.state_dict)
 
-        # 恢复优化器（如果传入）
         if optimizer is not None:
             try:
                 optimizer.load_state_dict(ckpt.optimizer)
@@ -145,7 +133,6 @@ def load_checkpoint(
             except Exception as e:
                 logger.warning(f"Failed to load optimizer state: {e}")
 
-        # 恢复调度器（如果传入）
         if scheduler is not None:
             try:
                 scheduler.load_state_dict(ckpt.scheduler)
@@ -163,13 +150,12 @@ def load_checkpoint(
 
 def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     """
-    获取目录中最新的 checkpoint 文件（按 epoch 排序）
 
     Args:
-        checkpoint_dir: 检查点目录
+        checkpoint_dir:
 
     Returns:
-        最新 checkpoint 路径，若无则返回 None
+        latest checkpoint path, or None
     """
     checkpoint_dir = Path(checkpoint_dir)
     if not checkpoint_dir.exists():
@@ -193,11 +179,10 @@ def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
 
 def cleanup_old_checkpoints(checkpoint_dir: str, keep_last: int = 5):
     """
-    清理旧的 checkpoint，保留最新的 N 个
 
     Args:
-        checkpoint_dir: 检查点目录
-        keep_last: 保留最近几个
+        checkpoint_dir:
+        keep_last:
     """
     checkpoint_dir = Path(checkpoint_dir)
     if not checkpoint_dir.exists():
@@ -215,8 +200,141 @@ def cleanup_old_checkpoints(checkpoint_dir: str, keep_last: int = 5):
     if len(files) <= keep_last:
         return
 
-    # 按 epoch 排序，保留最后 keep_last 个
     files.sort(key=lambda x: x[0])
     for _, f in files[:-keep_last]:
         f.unlink()
         logger.info(f"Removed old checkpoint: {f}")
+
+
+class EarlyStopping:
+    """
+    Early stopping to terminate training when validation metric stops improving.
+
+    Example:
+        early_stopper = EarlyStopping(
+            patience=5,
+            mode='max',
+            delta=0.0,
+            checkpoint_dir='./checkpoints'
+        )
+
+        for epoch in range(n_epochs):
+            # ... training ...
+            test_loss, test_acc = evaluate(model, test_loader)
+            should_stop = early_stopper.step(test_acc, model, optimizer, scheduler, epoch, config)
+            if should_stop:
+                break
+    """
+
+    def __init__(
+        self,
+        patience: int = 7,
+        mode: str = 'min',
+        delta: float = 0.0,
+        checkpoint_dir: str = './checkpoints',
+        verbose: bool = True
+    ):
+        """
+        Args:
+            patience: Number of epochs with no improvement after which training will be stopped.
+            mode: One of 'min' or 'max'. In 'min' mode, lower metric is better; in 'max', higher is better.
+            delta: Minimum change in the monitored quantity to qualify as an improvement.
+            checkpoint_dir: Directory to save the best model checkpoint.
+            verbose: If True, prints message for new best model.
+        """
+        self.patience = patience
+        self.mode = mode
+        self.delta = delta
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.verbose = verbose
+
+        self.best_score = None
+        self.best_epoch = None
+        self.counter = 0
+        self.early_stop = False
+        self.is_better = None
+
+        # Set comparison function based on mode
+        if mode == 'min':
+            self.is_better = lambda new, best: new < best - delta
+            self.best_score = float('inf')
+        elif mode == 'max':
+            self.is_better = lambda new, best: new > best + delta
+            self.best_score = float('-inf')
+        else:
+            raise ValueError(f"mode must be 'min' or 'max', got {mode}")
+
+        # Create checkpoint directory
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    def step(
+        self,
+        metric: float,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler,
+        epoch: int,
+        config: dict
+    ) -> bool:
+        """
+        Call this at the end of each epoch.
+
+        Args:
+            metric: Current validation/test metric (e.g., accuracy, F1, loss).
+            model: Model to save if metric improves.
+            optimizer: Optimizer state to save.
+            scheduler: Scheduler state to save.
+            epoch: Current epoch index.
+            config: Training config dict.
+
+        Returns:
+            bool: True if early stop signal is triggered, else False.
+        """
+        if self.early_stop:
+            return True  # Already triggered
+
+        if self.is_better(metric, self.best_score):
+            self.best_score = metric
+            self.best_epoch = epoch
+            self.counter = 0
+            self._save_checkpoint(model, optimizer, scheduler, epoch, config)
+            if self.verbose:
+                print(f"EarlyStopping: New best model at epoch {epoch} with metric {metric:.6f}")
+        else:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping: {self.counter}/{self.patience} (best: {self.best_score:.6f} at epoch {self.best_epoch})")
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.verbose:
+                    print(f"EarlyStopping: Stopping training at epoch {epoch}. Best was {self.best_score:.6f} at epoch {self.best_epoch}")
+
+        return self.early_stop
+
+    def _save_checkpoint(
+        self,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler,
+        epoch: int,
+        config: dict
+    ):
+        """Save the best model checkpoint using your existing save_checkpoint function."""
+        filepath = self.checkpoint_dir / "model_best.pth"
+        save_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            config=config,
+            filepath=str(filepath),
+            is_best=True  # This will also save to model_best.pth
+        )
+
+    def get_best_score(self) -> float:
+        """Return the best metric score observed so far."""
+        return self.best_score
+
+    def get_best_epoch(self) -> Optional[int]:
+        """Return the epoch at which the best metric was observed."""
+        return self.best_epoch

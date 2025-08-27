@@ -67,17 +67,15 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
         dataset = WordNet18RR(root, transform=transform)
     else:
         raise ValueError('Invalid data_name')
-    return dataset[0]
+    return dataset
 
 
 def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
     root = configs.root
-    transform = T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-                                  num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
     if data_name == "Tox21":
-        dataset = MoleculeNet(root, data_name, transform=transform)
+        dataset = MoleculeNet(root, data_name)
     elif data_name == "PROTEINS":
-        dataset = TUDataset(root, data_name, transform=transform)
+        dataset = TUDataset(root, data_name)
     else:
         raise ValueError('Invalid data_name')
     return dataset
