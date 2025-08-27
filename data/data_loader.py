@@ -5,6 +5,7 @@ from ogb.nodeproppred import PygNodePropPredDataset
 from data.data_process import KGNodeInitializer, unify_feature_dimension
 from torch_geometric.data import Dataset
 from torch_geometric.utils import to_undirected
+from torch.utils.data import ConcatDataset
 
 
 def load_pretrain_single_graph_data(configs, data_name):
@@ -39,7 +40,9 @@ def load_pretrain_single_graph_data(configs, data_name):
 def load_pretrain_multi_graph_data(configs, data_name):
     root = configs.root
     if data_name == 'PPI':
-        dataset = PPI(root)
+        dataset = ConcatDataset([PPI(f"{root}/{data_name}", split='train'),
+                                 PPI(f"{root}/{data_name}", split='val'),
+                                 PPI(f"{root}/{data_name}", split='test')])
     elif data_name in ["PCBA"]:
         dataset = MoleculeNet(root, name=data_name)
     else:

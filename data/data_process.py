@@ -219,6 +219,7 @@ def search_adjacent_edges(edge_index, num_samples=None):
 
 
 def unify_feature_dimension(x, uni_dim):
+    x = x.float()
     U, S, VT = torch.svd(x)
     x_reduced = S.unsqueeze(-1) * VT[: uni_dim].t()
     return x_reduced

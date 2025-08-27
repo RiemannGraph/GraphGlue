@@ -9,11 +9,19 @@ from typing import List, Dict, Any
 class PretrainConfig:
     # Data
     num_neighbors: List[int]
-    k_hops: int
     pretrain_single_graph_data: List[str]
     pretrain_multi_graph_data: List[str]
+
+    root: str = "./datasets"
+    kg_model: str = "transe"
+    kg_batch_size: int = 1024
+    kg_epochs: int = 500
+
+    k_hops: int = 2
     batch_size: int = 128
     num_workers: int = 8
+
+    in_dim: int = 50
 
     # Training
     pretrain_epochs: int = 100
@@ -36,9 +44,14 @@ def get_config_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Data
+    parser.add_argument('--root', type=str, default="./datasets")
+    parser.add_argument('--kg_model', type=str, default="transe",
+                        choices=['transe', 'complex', 'distmult', 'rotate'], help="Knowledge Graph Model for KG embedding")
+    parser.add_argument('--kg_batch_size', type=int, default=1024, help="batch size to training kg_model")
+    parser.add_argument('--kg_epochs', type=int, default=500, help="number of training kg_model epochs")
     parser.add_argument('--num_neighbors', type=int, nargs='+', default=[10, 10, 10],
                         help='neighbor number of each hop')
-    parser.add_argument('--k_hops', type=int, required=True,
+    parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
     parser.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
                         default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
