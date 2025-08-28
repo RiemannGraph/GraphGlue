@@ -1,7 +1,7 @@
 import os
 import time
 import torch
-from torch_geometric.loader import NeighborLoader, DataLoader
+from torch_geometric.loader import NeighborLoader, DataLoader, LinkLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
@@ -23,23 +23,27 @@ class Trainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logger if logger is not None else create_logger(configs.log_path)
 
+        self.train_loaders = []
+        self.val_loaders = []
+        self.test_loaders = []
         if configs.task_type == "node_cls":
             self.dataset = load_few_shot_single_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trails,
                                                            configs.num_val, configs.num_test)
             data = self.dataset[0]
-            self.train_loader = NeighborLoader(data, configs.num_neighbors, input_nodes=data.train_mask, shuffle=True,
-                                               transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                  RenameFromRootedEgoNets()])
-                                               )
-            self.val_loader = NeighborLoader(data, configs.num_neighbors, input_nodes=data.val_mask, shuffle=False,
-                                             transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                RenameFromRootedEgoNets()])
-                                             )
-            self.test_loader = NeighborLoader(data, configs.num_neighbors, input_nodes=data.test_mask, shuffle=False,
-                                              transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                 RenameFromRootedEgoNets()])
-                                              )
+            for t in range(self.configs.num_trails):
+                self.train_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.train_mask[:, t], shuffle=True,
+                                                   transform=Compose([RootedEgoNets(self.configs.k_hops),
+                                                                      RenameFromRootedEgoNets()])
+                                                   ))
+                self.val_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.val_mask[:, t], shuffle=False,
+                                                 transform=Compose([RootedEgoNets(self.configs.k_hops),
+                                                                    RenameFromRootedEgoNets()])
+                                                 ))
+                self.test_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.test_mask[:, t], shuffle=False,
+                                                  transform=Compose([RootedEgoNets(self.configs.k_hops),
+                                                                     RenameFromRootedEgoNets()])
+                                                  ))
         elif configs.task_type == "graph_cls":
             self.dataset = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trails,
@@ -89,6 +93,7 @@ class Trainer:
                 self.logger.info(f"Resumed from epoch {self.start_epoch}")
 
         # Train loop
+        for
         self.model.train()
         for epoch in range(self.start_epoch, self.configs.task_epochs):
             epoch_start_time = time.time()

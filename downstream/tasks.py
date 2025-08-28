@@ -30,6 +30,7 @@ def train_node_cls(train_loader, optimizer, model: RPGPrompt, device):
 
 
 def evaluate_node_cls(loader, model: RPGPrompt, device):
+    model.eval()
     total_loss = 0.
     trues = []
     preds = []
