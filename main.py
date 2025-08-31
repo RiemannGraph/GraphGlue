@@ -10,7 +10,9 @@ def main():
         print(f"  {k}: {v}")
 
     trainer = Pretrainer(config)
-    trainer.train()
+    # trainer.train()
+    trainer.register_from_loaders()
+
 
 if __name__ == '__main__':
     main()

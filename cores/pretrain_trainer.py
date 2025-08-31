@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore")
 
 class Pretrainer:
     def __init__(self, configs, logger=None):
+        self.final_model_path = None
         assert len(configs.num_neighbors) >= configs.k_hops, "number of neighbor hops are not match!"
         self.configs = configs
         self.pretrain_single_graph_data = configs.pretrain_single_graph_data
@@ -95,12 +96,16 @@ class Pretrainer:
                     self.configs.checkpoint_dir,
                     'pretrain_final_model.pth'
                 )
-                torch.save({
-                    'epoch': epoch + 1,
-                    'state_dict': self.model.state_dict(),
-                    'config': self.configs.__dict__,
-                }, final_model_path)
+                save_checkpoint(
+                    model=self.model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    epoch=epoch + 1,
+                    config=self.configs.__dict__,
+                    filepath=final_model_path
+                )
                 self.logger.info(f'Saved final model: {final_model_path}')
+                self.final_model_path = final_model_path
 
     def _train_epoch(self, optimizer, epoch):
         self.model.train()
@@ -197,6 +202,60 @@ class Pretrainer:
         else:
             self.logger.warning("Not enough graph prototypes for inter-loss.")
         return total_loss / total_batches
+
+    @torch.no_grad()
+    def register_from_loaders(self):
+        if self.final_model_path:
+            load_checkpoint(self.final_model_path, self.model, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.eval()
+        proto_z_list = []
+        proto_z_tan_list = []
+
+        num_node_level_datasets = len(self.pretrain_single_graph_data)
+        if num_node_level_datasets > 0:
+            for data_name in self.pretrain_single_graph_data:
+                z_parts, z_tan_parts = [], []
+                loader = self._create_node_loader(data_name)
+                for data in loader:
+                    data = data.to(self.model.device)
+                    z, z_tan = self.model(data, data.batch_graph_nums)
+                    z_parts.append(z[: loader.batch_size].cpu())
+                    z_tan_parts.append(z_tan[: loader.batch_size].cpu())
+
+                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)  # [1, d]
+                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
+                proto_z_list.append(z_proto)
+                proto_z_tan_list.append(z_tan_proto)
+
+                del loader
+                gc.collect()
+
+        num_graph_level_datasets = len(self.pretrain_multi_graph_data)
+        if num_graph_level_datasets > 0:
+            for data_name in self.pretrain_multi_graph_data:
+                z_parts, z_tan_parts = [], []
+                loader = self._create_graph_loader(data_name)
+                for data in loader:
+                    data = data.to(self.device)
+                    z, z_tan = self.model(data, data.batch_size)
+                    z_parts.append(z.cpu())
+                    z_tan_parts.append(z_tan.cpu())
+                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)
+                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
+                proto_z_list.append(z_proto)
+                proto_z_tan_list.append(z_tan_proto)
+
+                del loader
+                gc.collect()
+
+        if not proto_z_list:
+            raise ValueError("No loaders provided or no data processed.")
+
+        final_proto_z = torch.cat(proto_z_list, dim=0)  # [K, d]
+        final_proto_z_tan = torch.cat(proto_z_tan_list, dim=0)  # [K, M, d]
+
+        self.model.register_prototypes(final_proto_z, final_proto_z_tan)
+        return self.model
 
     def _create_node_loader(self, data_name):
         data = load_pretrain_single_graph_data(self.configs, data_name)

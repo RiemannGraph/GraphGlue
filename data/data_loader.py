@@ -47,7 +47,7 @@ def load_pretrain_single_graph_data(configs, data_name):
 def load_pretrain_multi_graph_data(configs, data_name):
     root = configs.root
     if data_name in ["PCBA"]:
-        dataset = MoleculeNet(root, name=data_name, transform=UnifyFeatureDims(configs.in_dim))
+        dataset = MoleculeNet(root, name=data_name, pre_transform=UnifyFeatureDims(configs.in_dim))
     else:
         raise ValueError('Invalid data_name')
     dataset = GraphDataset(dataset)
@@ -193,14 +193,13 @@ def load_few_shot_edge_data(configs, data_name, k_shot, num_splits, num_val=0.1,
 
 
 class GraphDataset(Dataset):
-    def __init__(self, dataset: Dataset, in_dim=128):
+    def __init__(self, dataset: Dataset):
         """
 
         :param dataset: Graph-level dataset
         :param in_dim: the unified dimension of features as inputs
         """
         super(GraphDataset, self).__init__()
-        self.in_dim = in_dim
         self.dataset = dataset
 
     def len(self):
@@ -208,6 +207,7 @@ class GraphDataset(Dataset):
 
     def get(self, idx):
         data = self.dataset[idx]
+        data.x = data.x.float()
         if data.edge_weight is None:
             data.edge_weight = torch.ones_like(data.edge_index[0]).float()
         return data

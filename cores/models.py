@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +8,7 @@ from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
 from typing import List, Optional
+import gc
 
 
 class PTGB(nn.Module):
@@ -94,7 +93,7 @@ class RPGraphFM(nn.Module):
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
         self.geo_loss = GeometricPersistLoss(configs.regular_coef_pt, configs.regular_coef_curv)
-        self._is_global_representation_registered = False
+        self._is_global_prototypes_registered = False
 
     def forward(self, graph: Data, batch_graph_nums: int = None):
         """
@@ -156,45 +155,14 @@ class RPGraphFM(nn.Module):
 
         return ptg_loss + cl_loss + geo_loss
 
-    def register_global_representation(self,
-                                       node_loaders: Optional[List[NeighborLoader]],
-                                       graph_loaders: Optional[List[DataLoader]]):
+    def register_prototypes(self, proto_z: torch.Tensor, proto_z_tan: torch.Tensor):
         """
-        TODO: register for all datasets
-        :param node_loaders: NeighborLoader for node-level datasets
-        :param graph_loaders: DataLoader for graph-level datasets
-        :return:
+        :param proto_z: [num_datasets, d]
+        :param proto_z_tan: [num_datasets, M, d]
         """
-        proto_z = []
-        proto_z_tan = []
-        self.eval()
-        if len(node_loaders) > 0:
-            for node_loader in node_loaders:
-                g_rep = []
-                g_rep_tan = []
-                for data in node_loader:
-                    z, z_tan = self.forward(data, data.batch_graph_nums)
-                    g_rep.append(z[: data.batch_size].cpu())
-                    g_rep_tan.append(z_tan[: data.batch_size].cpu())
-
-                proto_z.append(torch.concat(g_rep, dim=0).mean(dim=0, keepdim=True))
-                proto_z_tan.append(torch.concat(g_rep_tan, dim=0).mean(dim=0, keepdim=True))
-
-        if len(graph_loaders) > 0:
-            for graph_loader in graph_loaders:
-                g_rep = []
-                g_rep_tan = []
-                for data in graph_loader:
-                    z, z_tan = self.forward(data, data.batch_size)
-                    g_rep.append(z.cpu())
-                    g_rep_tan.append(z_tan.cpu())
-                proto_z.append(torch.concat(g_rep, dim=0).mean(dim=0, keepdim=True))
-                proto_z_tan.append(torch.concat(g_rep_tan, dim=0).mean(dim=0, keepdim=True))
-        proto_z = torch.concat(proto_z, dim=0)
-        proto_z_tan = torch.concat(proto_z_tan, dim=0)
-        self.register_buffer('proto_z', proto_z)   # (K, d)
-        self.register_buffer("proto_z_tan", proto_z_tan)  # (K, M, d)
-        self._is_global_representation_registered = True
+        self.register_buffer('proto_z', proto_z)
+        self.register_buffer('proto_z_tan', proto_z_tan)
+        self._is_global_prototypes_registered = True
 
     def frozen(self):
         for param in self.parameters():
@@ -205,8 +173,8 @@ class RPGraphFM(nn.Module):
             param.requires_grad_(True)
 
     @property
-    def is_global_representation_registered(self):
-        return self._is_global_representation_registered
+    def is_global_prototypes_registered(self):
+        return self._is_global_prototypes_registered
 
     @staticmethod
     def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):

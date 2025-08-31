@@ -18,8 +18,8 @@ class RPGPrompt(nn.Module):
         :param num_cls: classes number
         """
         super(RPGPrompt, self).__init__()
-        assert pretrained_model.is_global_representation_registered, \
-            "the global representation must be stored in pretraining phase."
+        assert pretrained_model.is_global_prototypes_registered, \
+            "the global prototype must be stored in pretraining phase."
         assert task_type in configs.task_types, "the task type must be stored in configs.task_types."
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
