@@ -1,10 +1,10 @@
 from data.data_loader import (
-    load_few_shot_single_graph_data, load_few_shot_multi_graph_data, load_few_shot_edge_data
+    load_few_shot_edge_data
 )
-from cores.configs import parse_config
+from configs.pretrain_config import parse_pretrain_config
 
 if __name__ == '__main__':
-    configs = parse_config()
+    configs = parse_pretrain_config()
     data_name = "WordNet18RR"
     configs.root = "../datasets"
     configs.kg_model = "transe"

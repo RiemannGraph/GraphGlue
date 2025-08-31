@@ -1,17 +1,16 @@
 import sys
 import argparse
-import yaml
-import os
-from dataclasses import dataclass, asdict
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+from typing import List
+from configs.base_config import ModelConfig, add_model_config, load_config_from_yaml, save_config_to_yaml
 
 
 @dataclass
-class PretrainConfig:
+class PretrainConfig(ModelConfig):
     # Data
-    num_neighbors: List[int]
-    pretrain_single_graph_data: List[str]
-    pretrain_multi_graph_data: List[str]
+    num_neighbors: List[int] = None
+    pretrain_single_graph_data: List[str] = None
+    pretrain_multi_graph_data: List[str] = None
 
     root: str = "./datasets"
     kg_model: str = "transe"
@@ -21,22 +20,6 @@ class PretrainConfig:
     k_hops: int = 2
     batch_size: int = 128
     num_workers: int = 0
-
-    n_layers: int = 3
-    in_dim: int = 50
-    num_samples: Optional[int] = None
-    num_generators: int = 128
-    hid_dim: int = 256
-    att_dim: int = 512
-    bias: bool = True
-    act_str: str = "gelu"
-    drop: float = 0.1
-    conv_name: str = "gcn"
-    normalize: bool = True
-    norm_str: str = "layer_norm"
-    temperature: float = 1.0
-    regular_coef_pt: float = 0.5
-    regular_coef_curv: float = .5
 
     # Training
     pretrain_epochs: int = 100
@@ -51,11 +34,11 @@ class PretrainConfig:
     knn: int = 15
 
     # Paths
-    log_path: str = "logs/pretrain.log"
+    log_path: str = "logs/pretrain/pretrain.log"
     checkpoint_dir: str = "checkpoints/pretrain/"
 
 
-def get_config_parser():
+def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Data
@@ -70,7 +53,7 @@ def get_config_parser():
                         help='subgraph sample hops <= len(num_neighbors)')
     parser.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
                         # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
-                        default=[],
+                        default=["ogbn-arxiv"],
                         help='node-level pretraining datasets')
     parser.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
                         help='graph-level pretraining datasets')
@@ -100,7 +83,7 @@ def get_config_parser():
                         help='KNN graph connections for inter-graph loss')
 
     # Paths
-    parser.add_argument('--log_path', type=str, default="logs/pretrain.log",
+    parser.add_argument('--log_path', type=str, default="logs/pretrain/pretrain.log",
                         help='Path to log file')
     parser.add_argument('--checkpoint_dir', type=str, default="checkpoints/pretrain/",
                         help='Directory to save checkpoints')
@@ -111,25 +94,12 @@ def get_config_parser():
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
 
+    add_model_config(parser)
     return parser
 
 
-def save_config_to_yaml(config: PretrainConfig, filepath: str):
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, 'w', encoding='utf-8') as f:
-        yaml.dump(asdict(config), f, default_flow_style=False, indent=2, sort_keys=False)
-    print(f"Config saved to {filepath}")
-
-
-def load_config_from_yaml(filepath: str) -> Dict[str, Any]:
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"Config file not found: {filepath}")
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
-
-
-def parse_config() -> PretrainConfig:
-    parser = get_config_parser()
+def parse_pretrain_config() -> PretrainConfig:
+    parser = get_pretrain_parser()
     args = parser.parse_args()
 
     # If using YAML file
@@ -147,6 +117,10 @@ def parse_config() -> PretrainConfig:
         k_hops=args.k_hops,
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,
+        root=args.root,
+        kg_model=args.kg_model,
+        kg_batch_size=args.kg_batch_size,
+        kg_epochs=args.kg_epochs,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pretrain_epochs=args.pretrain_epochs,
