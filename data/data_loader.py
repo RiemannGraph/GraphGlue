@@ -6,7 +6,7 @@ from torch_geometric.datasets import (
     WordNet18RR, TUDataset, MoleculeNet
 )
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_process import KGNodeInitializer, unify_feature_dimension
+from data.data_process import KGNodeInitializer, UnifyFeatureDims
 from torch_geometric.data import Dataset, Data
 from torch_geometric.utils import coalesce, to_undirected
 import numpy as np
@@ -37,9 +37,9 @@ def load_pretrain_single_graph_data(configs, data_name):
         data = dataset[0]
     else:
         raise ValueError('Invalid data_name')
-    data.x = unify_feature_dimension(data.x, configs.in_dim)
-    if not hasattr(data, "edge_weight"):
-        data.edge_weight = torch.ones_like(data.edge_index[0])
+    data = UnifyFeatureDims(configs.in_dim)(data)
+    if data.edge_weight is None:
+        data.edge_weight = torch.ones_like(data.edge_index[0]).float()
     data.edge_index, data.edge_weight = to_undirected(data.edge_index, data.edge_weight, num_nodes=data.num_nodes)
     return data
 
@@ -47,7 +47,7 @@ def load_pretrain_single_graph_data(configs, data_name):
 def load_pretrain_multi_graph_data(configs, data_name):
     root = configs.root
     if data_name in ["PCBA"]:
-        dataset = MoleculeNet(root, name=data_name)
+        dataset = MoleculeNet(root, name=data_name, transform=UnifyFeatureDims(configs.in_dim))
     else:
         raise ValueError('Invalid data_name')
     dataset = GraphDataset(dataset)
@@ -208,7 +208,6 @@ class GraphDataset(Dataset):
 
     def get(self, idx):
         data = self.dataset[idx]
-        data.x = unify_feature_dimension(data.x, self.in_dim)
-        if not hasattr(data, "edge_weight"):
-            data.edge_weight = torch.ones_like(data.edge_index[0])
+        if data.edge_weight is None:
+            data.edge_weight = torch.ones_like(data.edge_index[0]).float()
         return data

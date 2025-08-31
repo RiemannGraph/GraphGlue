@@ -93,53 +93,53 @@ class Trainer:
                 self.logger.info(f"Resumed from epoch {self.start_epoch}")
 
         # Train loop
-        for
-        self.model.train()
-        for epoch in range(self.start_epoch, self.configs.task_epochs):
-            epoch_start_time = time.time()
-            train_loss, train_acc = self._train_epoch(optimizer)
-            scheduler.step()
-            epoch_time = time.time() - epoch_start_time
+        for trial in range(self.configs.num_trials):
+            self.model.train()
+            for epoch in range(self.start_epoch, self.configs.task_epochs):
+                epoch_start_time = time.time()
+                train_loss, train_acc = self._train_epoch(optimizer)
+                scheduler.step()
+                epoch_time = time.time() - epoch_start_time
 
-            self.logger.info(
-                f'Epoch {epoch:03d}/{self.configs.task_epochs} | '
-                f'Train Loss: {train_loss:.6f} | '
-                f'Train ACC: {train_acc * 100:.2f}% | '
-                f'Time: {epoch_time:.2f}s | '
-                f'LR: {optimizer.param_groups[0]["lr"]:.2e}'
-            )
+                self.logger.info(
+                    f'Epoch {epoch:03d}/{self.configs.task_epochs} | '
+                    f'Train Loss: {train_loss:.6f} | '
+                    f'Train ACC: {train_acc * 100:.2f}% | '
+                    f'Time: {epoch_time:.2f}s | '
+                    f'LR: {optimizer.param_groups[0]["lr"]:.2e}'
+                )
 
-            # Evaluation
-            if (epoch + 1) % self.configs.eval_interval == 0:
-                if self.task_type == 'node_cls':
-                    val_loss, val_acc = evaluate_node_cls(self.val_loader, self.model, self.device)
-                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
-                elif self.task_type == 'graph_cls':
-                    val_loss, val_acc = evaluate_graph_cls(self.val_loader, self.model, self.device)
-                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
-                elif self.task_type == 'edge_cls':
-                    pass
+                # Evaluation
+                if (epoch + 1) % self.configs.eval_interval == 0:
+                    if self.task_type == 'node_cls':
+                        val_loss, val_acc = evaluate_node_cls(self.val_loader, self.model, self.device)
+                        self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                    elif self.task_type == 'graph_cls':
+                        val_loss, val_acc = evaluate_graph_cls(self.val_loader, self.model, self.device)
+                        self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                    elif self.task_type == 'edge_cls':
+                        pass
 
-                if early_stopping.step(
-                        metric=val_acc,
+                    if early_stopping.step(
+                            metric=val_acc,
+                            model=self.model,
+                            optimizer=optimizer,
+                            scheduler=scheduler,
+                            epoch=epoch,
+                            config=self.configs
+                    ):
+                        break
+
+                # Save
+                if (epoch + 1) % self.configs.save_interval == 0 or (epoch + 1) == self.configs.finetune_epochs:
+                    save_checkpoint(
                         model=self.model,
                         optimizer=optimizer,
                         scheduler=scheduler,
-                        epoch=epoch,
-                        config=self.configs
-                ):
-                    break
-
-            # Save
-            if (epoch + 1) % self.configs.save_interval == 0 or (epoch + 1) == self.configs.finetune_epochs:
-                save_checkpoint(
-                    model=self.model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    epoch=epoch + 1,
-                    config=self.configs.__dict__,
-                    filepath=os.path.join(self.configs.checkpoint_dir, f'downstream_epoch_{epoch+1}.pth')
-                )
+                        epoch=epoch + 1,
+                        config=self.configs.__dict__,
+                        filepath=os.path.join(self.configs.checkpoint_dir, f'downstream_{trial+1}_epoch_{epoch+1}.pth')
+                    )
 
         # Final save
         final_path = os.path.join(self.configs.checkpoint_dir, 'downstream_final.pth')

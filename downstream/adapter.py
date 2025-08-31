@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data
-from cores.models import RPGraphFM
+
+from cores.loss_funcs import PTGBLoss
+from cores.models import RPGraphFM, FeedForwardLayer
 from torch_geometric.data import Data, Batch
 
 
@@ -24,6 +26,10 @@ class RPGPrompt(nn.Module):
         self.pretrained_model = pretrained_model
         self.prompt = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
         self.align_coef = configs.align_coef
+        num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
+        self.gated_func = FeedForwardLayer(configs.hid_dim, configs.hid_dim, num_datasets,
+                                           configs.bias, configs.act_str, configs.drop)
+        self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         if task_type == "node_cls":
             self.head = NodeClassificationAdapter(configs.hid_dim, num_cls)
         elif task_type == "graph_cls":
@@ -38,19 +44,16 @@ class RPGPrompt(nn.Module):
             else:
                 batch_graph_nums = graph.batch_size
         z, z_tan = self.pretrained_model(graph, batch_graph_nums)
-        z_tan = z_tan @ self.prompt
-        return z, z_tan
+        weights = self.gated_func(z)    # [*, K]
+        z_tan_align = weights @ self.pretrained_model.proto_z_tan   # [*, M, d]
+        z_tan_adapt = z_tan @ self.prompt
+        align_loss = self.align_coef * torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
+        ptgb_loss = self.ptg_loss(z_tan_align)
+        return z, z_tan_adapt, align_loss + ptgb_loss
 
     def predict(self, z: torch.Tensor, graph: Data):
         z = self.head(z, graph)
         return z
-
-    def loss(self, z_tan):
-        return self.prompt_loss(z_tan, self.pretrained_model.global_tan, self.align_coef)
-
-    @staticmethod
-    def prompt_loss(z_tan_tgt, z_tan_src, align_coef: float):
-        return align_coef * torch.frobenius_norm(z_tan_src.unsqueeze(0) - z_tan_tgt, dim=[1, 2]).mean()
 
 
 class NodeClassificationAdapter(nn.Module):

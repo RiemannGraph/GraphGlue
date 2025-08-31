@@ -1,6 +1,9 @@
 import logging
 import time
 from datetime import timedelta
+from pathlib import Path
+
+from sympy.codegen.ast import Raise
 
 
 class DotDict(dict):
@@ -13,6 +16,10 @@ class DotDict(dict):
 
 
 def create_logger(filepath, colored=False, debug=False):
+    try:
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+       raise FileExistsError(f"Failed to create Log file {filepath}: {str(e)}")
     log_formatter = LogFormatter(colored=colored)
 
     # create file handler and set level

@@ -218,10 +218,59 @@ def search_adjacent_edges(edge_index, num_samples=None):
     return paths.t().contiguous()
 
 
-def unify_feature_dimension(x, uni_dim):
+class UnifyFeatureDims(BaseTransform):
+    def __init__(self, uni_dim: int):
+        self.uni_dim = uni_dim
+
+    def forward(self, data: Data):
+        data.x = unify_feature_dimension(data.x, self.uni_dim)
+        return data
+
+
+def unify_feature_dimension(
+        x,
+        uni_dim: int,
+        center: bool = True
+):
+    if x.dim() == 1:
+        x = x.unsqueeze(-1)  # [n] -> [n, 1]
+
+    num_nodes, original_dim = x.shape
+    device = x.device
+
+    if num_nodes == 0:
+        return torch.zeros((0, uni_dim), device=device, dtype=torch.float)
+
+    if original_dim == 0:
+        return torch.zeros((num_nodes, uni_dim), device=device, dtype=torch.float)
+
     x = x.float()
-    U, S, VT = torch.svd(x)
-    x_reduced = S.unsqueeze(-1) * VT[: uni_dim].t()
+
+    if center:
+        mean = x.mean(dim=0, keepdim=True)
+        x_centered = x - mean
+    else:
+        x_centered = x
+
+    if original_dim >= uni_dim:
+        U, S, Vt = torch.svd(x_centered)
+        U_k = U[:, :uni_dim]
+        S_k = S[:uni_dim]
+        x_reduced = U_k * S_k
+    else:
+        try:
+            U, S, Vt = torch.svd(x_centered)
+        except RuntimeError as e:
+            print(f"SVD failed: {e}. Using zero initialization.")
+            return torch.zeros((num_nodes, uni_dim), device=device, dtype=torch.float)
+
+        x_reduced_full = U * S
+
+        padding = torch.zeros((num_nodes, uni_dim - original_dim), device=device, dtype=torch.float)
+        x_reduced = torch.cat([x_reduced_full, padding], dim=1)
+
+    x_reduced = torch.nan_to_num(x_reduced, nan=0.0, posinf=0.0, neginf=0.0)
+
     return x_reduced
 
 

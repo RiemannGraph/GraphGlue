@@ -3,7 +3,8 @@ import argparse
 import yaml
 import os
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
 
 @dataclass
 class PretrainConfig:
@@ -19,9 +20,23 @@ class PretrainConfig:
 
     k_hops: int = 2
     batch_size: int = 128
-    num_workers: int = 8
+    num_workers: int = 0
 
+    n_layers: int = 3
     in_dim: int = 50
+    num_samples: Optional[int] = None
+    num_generators: int = 128
+    hid_dim: int = 256
+    att_dim: int = 512
+    bias: bool = True
+    act_str: str = "gelu"
+    drop: float = 0.1
+    conv_name: str = "gcn"
+    normalize: bool = True
+    norm_str: str = "layer_norm"
+    temperature: float = 1.0
+    regular_coef_pt: float = 0.5
+    regular_coef_curv: float = .5
 
     # Training
     pretrain_epochs: int = 100
@@ -33,7 +48,7 @@ class PretrainConfig:
     resume_checkpoint: bool = False
 
     # Loss & Graph
-    knn: int = 5
+    knn: int = 15
 
     # Paths
     log_path: str = "logs/pretrain.log"
@@ -49,18 +64,19 @@ def get_config_parser():
                         choices=['transe', 'complex', 'distmult', 'rotate'], help="Knowledge Graph Model for KG embedding")
     parser.add_argument('--kg_batch_size', type=int, default=1024, help="batch size to training kg_model")
     parser.add_argument('--kg_epochs', type=int, default=500, help="number of training kg_model epochs")
-    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[10, 10, 10],
+    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[5, 2],
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
     parser.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237", "PPI"],
+                        # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
+                        default=[],
                         help='node-level pretraining datasets')
     parser.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
                         help='graph-level pretraining datasets')
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size for data loading')
-    parser.add_argument('--num_workers', type=int, default=8,
+    parser.add_argument('--num_workers', type=int, default=0,
                         help='Number of workers for data loading')
 
     # Training

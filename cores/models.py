@@ -5,9 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
+from torch_geometric.loader import DataLoader, NeighborLoader
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
+from typing import List, Optional
 
 
 class PTGB(nn.Module):
@@ -81,7 +83,7 @@ class RPGraphFM(nn.Module):
     def __init__(self, configs):
         super().__init__()
         self.num_samples = configs.num_samples
-        self.num_generators = configs.num_gerenators
+        self.num_generators = configs.num_generators
         self.input_lin = FeedForwardLayer(configs.in_dim, configs.hid_dim, configs.hid_dim,
                                           configs.bias, configs.act_str, configs.drop)
         self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
@@ -91,7 +93,7 @@ class RPGraphFM(nn.Module):
                                          configs.norm_str, configs.act_str, configs.drop)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
-        self.geo_loss = GeometricPersistLoss(configs.regular_coef)
+        self.geo_loss = GeometricPersistLoss(configs.regular_coef_pt, configs.regular_coef_curv)
         self._is_global_representation_registered = False
 
     def forward(self, graph: Data, batch_graph_nums: int = None):
@@ -113,12 +115,13 @@ class RPGraphFM(nn.Module):
         x = self.input_lin(x)
         z = self.encoder(x, edge_index, edge_weight, batch)
 
-        aug_graphs = self.ptg_bank(graph.x, graph.edge_index, graph.edge_weight, graph.batch, batch_graph_nums)
-        z_tan = []
+        aug_graphs = self.ptg_bank(x, graph.edge_index, graph.edge_weight, graph.batch, batch_graph_nums)
+        z_aug = []
         for aug_graph in aug_graphs:
             tan = self.encoder(aug_graph.x, aug_graph.edge_index, aug_graph.edge_weight, aug_graph.batch)
-            z_tan.append(tan)
-        z_tan = torch.stack(z_tan, dim=1)
+            z_aug.append(tan)
+        z_aug = torch.stack(z_aug, dim=1)
+        z_tan = z_aug - z.unsqueeze(1)
         return z, z_tan
 
     def loss(self, z, z_tan, edge_index, batch_size: Optional[int] = None):
@@ -139,24 +142,58 @@ class RPGraphFM(nn.Module):
         pt_matrix_ik = self.parallel_translation(z_tan_i, z_tan_k)
         pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
 
-        log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T, d, d]
+        log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
         log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
-        log_r_matrix_ik = self.log_volume_ratio(z_tan_i, z_tan_k)
-        log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk, log_r_matrix_ik], dim=0)  # [3, T]
+        log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
 
         geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
 
         if batch_size is not None:
             z = z[:batch_size]
             z_tan = z_tan[:batch_size]
-        ptg_loss = self.ptg_loss(z, z_tan)
-        cl_loss = self.contra_loss(z, z_tan)
+        ptg_loss = self.ptg_loss(z_tan)
+        cl_loss = self.contra_loss(z, z.unsqueeze(1) + z_tan)
 
         return ptg_loss + cl_loss + geo_loss
 
-    def register_global_representation(self, h, h_tan):
-        self.register_buffer('source_knowledge', h)
-        self.register_buffer("global_tan", h_tan.mean(dim=0))
+    def register_global_representation(self,
+                                       node_loaders: Optional[List[NeighborLoader]],
+                                       graph_loaders: Optional[List[DataLoader]]):
+        """
+        TODO: register for all datasets
+        :param node_loaders: NeighborLoader for node-level datasets
+        :param graph_loaders: DataLoader for graph-level datasets
+        :return:
+        """
+        proto_z = []
+        proto_z_tan = []
+        self.eval()
+        if len(node_loaders) > 0:
+            for node_loader in node_loaders:
+                g_rep = []
+                g_rep_tan = []
+                for data in node_loader:
+                    z, z_tan = self.forward(data, data.batch_graph_nums)
+                    g_rep.append(z[: data.batch_size].cpu())
+                    g_rep_tan.append(z_tan[: data.batch_size].cpu())
+
+                proto_z.append(torch.concat(g_rep, dim=0).mean(dim=0, keepdim=True))
+                proto_z_tan.append(torch.concat(g_rep_tan, dim=0).mean(dim=0, keepdim=True))
+
+        if len(graph_loaders) > 0:
+            for graph_loader in graph_loaders:
+                g_rep = []
+                g_rep_tan = []
+                for data in graph_loader:
+                    z, z_tan = self.forward(data, data.batch_size)
+                    g_rep.append(z.cpu())
+                    g_rep_tan.append(z_tan.cpu())
+                proto_z.append(torch.concat(g_rep, dim=0).mean(dim=0, keepdim=True))
+                proto_z_tan.append(torch.concat(g_rep_tan, dim=0).mean(dim=0, keepdim=True))
+        proto_z = torch.concat(proto_z, dim=0)
+        proto_z_tan = torch.concat(proto_z_tan, dim=0)
+        self.register_buffer('proto_z', proto_z)   # (K, d)
+        self.register_buffer("proto_z_tan", proto_z_tan)  # (K, M, d)
         self._is_global_representation_registered = True
 
     def frozen(self):
@@ -202,7 +239,7 @@ class RPGraphFM(nn.Module):
         :return: PT matrix: torch.Tensor
         """
 
-        U, _, VT = torch.svd(basis_dst @ basis_src.t())
+        U, _, VT = torch.linalg.svd(basis_dst @ basis_src.transpose(-1, -2))
         P = U @ VT
         return P
 
@@ -215,7 +252,7 @@ class RPGraphFM(nn.Module):
 
         :return: log ratio: torch.Tensor
         """
-        vol_src, vol_dst = torch.det(basis_src.t() @ basis_src), torch.det(basis_dst.t() @ basis_dst)
+        vol_src, vol_dst = torch.det(basis_src.transpose(-1, -2) @ basis_src), torch.det(basis_dst.transpose(-1, -2) @ basis_dst)
         abs_vol_src_stable = torch.sqrt(vol_src ** 2 + 1e-6)
         abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + 1e-6)
         log_r = torch.log(abs_vol_dst_stable) - torch.log(abs_vol_src_stable)
