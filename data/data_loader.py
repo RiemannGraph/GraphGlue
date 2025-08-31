@@ -47,7 +47,7 @@ def load_pretrain_single_graph_data(configs, data_name):
 def load_pretrain_multi_graph_data(configs, data_name):
     root = configs.root
     if data_name in ["PCBA"]:
-        dataset = MoleculeNet(root, name=data_name, pre_transform=UnifyFeatureDims(configs.in_dim))
+        dataset = MoleculeNet(root, name=data_name, transform=UnifyFeatureDims(configs.in_dim))
     else:
         raise ValueError('Invalid data_name')
     dataset = GraphDataset(dataset)

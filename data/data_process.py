@@ -238,36 +238,35 @@ def unify_feature_dimension(
     num_nodes, original_dim = x.shape
     device = x.device
 
-    if num_nodes == 0:
-        return torch.zeros((0, uni_dim), device=device, dtype=torch.float)
-
-    if original_dim == 0:
+    if num_nodes == 0 or original_dim == 0:
         return torch.zeros((num_nodes, uni_dim), device=device, dtype=torch.float)
 
     x = x.float()
 
     if center:
-        mean = x.mean(dim=0, keepdim=True)
-        x_centered = x - mean
-    else:
-        x_centered = x
+        x = x - x.mean(dim=0, keepdim=True)
 
     if original_dim >= uni_dim:
-        U, S, Vt = torch.svd(x_centered)
-        U_k = U[:, :uni_dim]
-        S_k = S[:uni_dim]
-        x_reduced = U_k * S_k
+        U, S, Vt = torch.svd(x, some=True)  # U: [n, min(n,d)], S: [min(n,d)]
+        k = min(U.shape[1], uni_dim)
+        U_k = U[:, :k]  # [n, k]
+        S_k = S[:k]  # [k]
+        x_reduced = U_k * S_k  # [n, k]
+
+        if k < uni_dim:
+            padding = torch.zeros((num_nodes, uni_dim - k), device=device, dtype=torch.float)
+            x_reduced = torch.cat([x_reduced, padding], dim=1)  # [n, uni_dim]
+
     else:
-        try:
-            U, S, Vt = torch.svd(x_centered)
-        except RuntimeError as e:
-            print(f"SVD failed: {e}. Using zero initialization.")
-            return torch.zeros((num_nodes, uni_dim), device=device, dtype=torch.float)
+        U, S, Vt = torch.svd(x, some=True)
+        k = U.shape[1]  # min(n, original_dim)
+        x_reduced = U * S  # [n, k]
 
-        x_reduced_full = U * S
-
-        padding = torch.zeros((num_nodes, uni_dim - original_dim), device=device, dtype=torch.float)
-        x_reduced = torch.cat([x_reduced_full, padding], dim=1)
+        if k < uni_dim:
+            padding = torch.zeros((num_nodes, uni_dim - k), device=device, dtype=torch.float)
+            x_reduced = torch.cat([x_reduced, padding], dim=1)  # [n, uni_dim]
+        else:
+            x_reduced = x_reduced[:, :uni_dim]
 
     x_reduced = torch.nan_to_num(x_reduced, nan=0.0, posinf=0.0, neginf=0.0)
 
