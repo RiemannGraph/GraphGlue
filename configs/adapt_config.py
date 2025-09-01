@@ -50,7 +50,7 @@ class AdaptionConfig(ModelConfig):
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
-    parser.add_argument("--data_name", type=str, default="WordNet18RR",
+    parser.add_argument("--data_name", type=str, default="PubMed",
                         help="Name of the dataset. [PubMed, Computers, FacebookPagePage, WordNet18RR, PROTEINS, HIV] ")
     parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
                         help="file path of pretrained model checkpoint.")
@@ -82,7 +82,7 @@ def get_pretrain_parser():
                         help='Number of workers for data loading')
 
     # Task
-    parser.add_argument("--task_type", type=str, default="link_cls", choices=["node_cls", "graph_cls", "link_pred"],
+    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_pred"],
                         help="Type of downstream task.")
     parser.add_argument("--k_shot", type=int, default=5,
                         help="Number of shots in few-shot learning.")

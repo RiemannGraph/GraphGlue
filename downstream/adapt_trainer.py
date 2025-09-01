@@ -1,5 +1,7 @@
 import os
 import time
+
+import numpy as np
 import torch
 from torch_geometric.loader import NeighborLoader, DataLoader, LinkNeighborLoader
 from torch.optim import Adam
@@ -18,14 +20,7 @@ from data.data_loader import (
     load_few_shot_single_graph_data,
     load_few_shot_link_graph_data
 )
-from downstream.tasks import (
-    train_node_cls,
-    evaluate_node_cls,
-    train_graph_cls,
-    evaluate_graph_cls,
-    train_link_cls,
-    evaluate_link_cls
-)
+from downstream.tasks import train_step, eval_step
 from downstream.adapter import RPGPrompt
 from utils.logger import create_logger
 from torch_geometric.transforms import RootedEgoNets, Compose
@@ -33,6 +28,11 @@ from data.data_transform import RenameFromRootedEgoNets
 
 
 class AdaptTrainer:
+    TASK_CONFIGS = {
+        'node_cls': {'label_attr': 'y', 'use_batch_size_limit': True, 'batch_graph_attr': 'batch_graph_nums'},
+        'graph_cls': {'label_attr': 'y', 'use_batch_size_limit': False, 'batch_graph_attr': 'batch_size'},
+        'link_cls': {'label_attr': 'edge_type', 'use_batch_size_limit': False, 'batch_graph_attr': 'batch_graph_nums'},
+    }
     def __init__(self, configs, logger=None):
         self.configs = configs
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -85,6 +85,7 @@ class AdaptTrainer:
                 self.logger.info(f"Resumed from epoch {self.start_epoch}")
 
         # Train loop
+        total_acc = []
         for trial in range(self.configs.num_trials):
             self.model.train()
             for epoch in range(self.start_epoch, self.configs.task_epochs):
@@ -103,12 +104,8 @@ class AdaptTrainer:
 
                 # Evaluation
                 if (epoch + 1) % self.configs.eval_interval == 0:
-                    if self.task_type == 'node_cls':
-                        val_loss, val_acc = evaluate_node_cls(self.val_loaders[trial], self.model, self.device)
-                    elif self.task_type == 'graph_cls':
-                        val_loss, val_acc = evaluate_graph_cls(self.val_loaders[trial], self.model, self.device)
-                    elif self.task_type == 'link_cls':
-                        val_loss, val_acc = evaluate_link_cls(self.val_loaders[trial], self.model, self.device)
+                    val_loss, val_acc = eval_step(self.val_loaders[trial], self.model, self.device,
+                                           **AdaptTrainer.TASK_CONFIGS[self.task_type])
                     self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
                     save_checkpoint(
                         model=self.model,
@@ -129,20 +126,21 @@ class AdaptTrainer:
                     ):
                         break
 
-        # Final save
-        final_path = os.path.join(self.configs.checkpoint_dir, 'downstream_final.pth')
-        torch.save({'state_dict': self.model.state_dict()}, final_path)
-        self.logger.info(f"Training finished. Final model saved to {final_path}")
+            # Final save
+            final_path = os.path.join(self.configs.checkpoint_dir, f'downstream_final_{trial}.pth')
+            torch.save({'state_dict': self.model.state_dict()}, final_path)
+            self.logger.info(f"Trial {trial} | Training finished. Final model saved to {final_path}")
+
+            test_loss, test_acc = eval_step(self.test_loaders[trial], self.model, self.device,
+                                            **AdaptTrainer.TASK_CONFIGS[self.task_type])
+            total_acc.append(test_acc)
+        self.logger.info(f'Final Test Acc: {np.mean(total_acc) * 100:.2f} \u00B1 {np.std(total_acc) * 100:.2f} %')
 
     def _train_epoch(self, optimizer, trial):
         loss = None
         acc = None
-        if self.task_type == 'node_cls':
-            loss, acc = train_node_cls(self.train_loaders[trial], optimizer, self.model, self.device)
-        elif self.task_type == 'graph_cls':
-            loss, acc = train_graph_cls(self.train_loaders[trial], optimizer, self.model, self.device)
-        elif self.task_type == 'link_cls':
-            loss, acc = train_link_cls(self.train_loaders[trial], optimizer, self.model, self.device)
+        loss, acc = train_step(self.train_loaders[trial], optimizer, self.model, self.device,
+                               **AdaptTrainer.TASK_CONFIGS[self.task_type])
         return loss, acc
 
     def get_loaders(self, configs):

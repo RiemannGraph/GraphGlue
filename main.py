@@ -5,15 +5,15 @@ from downstream.adapt_trainer import AdaptTrainer
 
 
 def main():
-    config = parse_pretrain_config()
-
-    print("Final Configuration:")
-    for k, v in config.__dict__.items():
-        print(f"  {k}: {v}")
-
-    trainer = Pretrainer(config)
-    trainer.train()
-    trainer.register_from_loaders()
+    # config = parse_pretrain_config()
+    #
+    # print("Final Configuration:")
+    # for k, v in config.__dict__.items():
+    #     print(f"  {k}: {v}")
+    #
+    # trainer = Pretrainer(config)
+    # trainer.train()
+    # trainer.register_from_loaders()
 
     config = parse_adaption_config()
 
