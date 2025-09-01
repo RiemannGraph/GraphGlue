@@ -66,7 +66,11 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
         dataset = FacebookPagePage(f"{root}/{data_name}", transform=transform)
     else:
         raise ValueError('Invalid data_name')
-    return dataset
+    data = dataset[0]
+    if data.edge_weight is None:
+        data.edge_weight = torch.ones_like(data.edge_index[0]).float()
+    data.edge_index, data.edge_weight = to_undirected(data.edge_index, data.edge_weight, num_nodes=data.num_nodes)
+    return dataset, data
 
 
 def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):

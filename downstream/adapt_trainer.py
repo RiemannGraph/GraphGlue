@@ -6,10 +6,21 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from cores.models import RPGraphFM
-from utils.checkpoints import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints, EarlyStopping
+from utils.checkpoints import (
+    save_checkpoint,
+    load_checkpoint,
+    get_latest_checkpoint,
+    cleanup_old_checkpoints,
+    EarlyStopping
+)
 from data.data_loader import load_few_shot_multi_graph_data, load_few_shot_single_graph_data
 from downstream.tasks import (
-    train_node_cls, evaluate_node_cls, train_graph_cls, evaluate_graph_cls,
+    train_node_cls,
+    evaluate_node_cls,
+    train_graph_cls,
+    evaluate_graph_cls,
+    train_link_cls,
+    eval_link_cls
 )
 from downstream.adapter import RPGPrompt
 from utils.logger import create_logger
@@ -27,20 +38,25 @@ class AdaptTrainer:
         self.val_loaders = []
         self.test_loaders = []
         if configs.task_type == "node_cls":
-            self.dataset = load_few_shot_single_graph_data(configs, configs.data_name,
+            self.dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
                                                            configs.num_val, configs.num_test)
-            data = self.dataset[0]
             for t in range(self.configs.num_trials):
-                self.train_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.train_mask[:, t], shuffle=True,
+                self.train_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                         input_nodes=data.train_mask[:, t],
+                                                         shuffle=True, batch_size=configs.batch_size,
                                                    transform=Compose([RootedEgoNets(self.configs.k_hops),
                                                                       RenameFromRootedEgoNets()])
                                                    ))
-                self.val_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.val_mask[:, t], shuffle=False,
+                self.val_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                       input_nodes=data.val_mask[:, t],
+                                                       shuffle=False, batch_size=configs.batch_size,
                                                  transform=Compose([RootedEgoNets(self.configs.k_hops),
                                                                     RenameFromRootedEgoNets()])
                                                  ))
-                self.test_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.test_mask[:, t], shuffle=False,
+                self.test_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                        input_nodes=data.test_mask[:, t],
+                                                        shuffle=False, batch_size=configs.batch_size,
                                                   transform=Compose([RootedEgoNets(self.configs.k_hops),
                                                                      RenameFromRootedEgoNets()])
                                                   ))
@@ -50,7 +66,7 @@ class AdaptTrainer:
                                                            configs.num_val, configs.num_test)
             #DOTO:
             self.train_loader = DataLoader(self.dataset, batch_size=configs.batch_size, shuffle=True)
-        elif configs.task_type == "edge_cls":
+        elif configs.task_type == "link_cls":
             pass
 
         pretrained_model = RPGraphFM(configs)
@@ -117,9 +133,18 @@ class AdaptTrainer:
                         val_loss, val_acc = evaluate_node_cls(self.val_loaders[trial], self.model, self.device)
                     elif self.task_type == 'graph_cls':
                         val_loss, val_acc = evaluate_graph_cls(self.val_loaders[trial], self.model, self.device)
-                    elif self.task_type == 'edge_cls':
-                        pass
+                    elif self.task_type == 'link_cls':
+                        val_loss, val_acc = evaluate_link_cls(self.val_loaders[trial], self.model, self.device)
                     self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                    save_checkpoint(
+                        model=self.model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        epoch=epoch + 1,
+                        config=self.configs.__dict__,
+                        filepath=os.path.join(self.configs.checkpoint_dir,
+                                              f'downstream_{trial + 1}_epoch_{epoch + 1}.pth')
+                    )
                     if early_stopping.step(
                             metric=val_acc,
                             model=self.model,
@@ -129,17 +154,6 @@ class AdaptTrainer:
                             config=self.configs
                     ):
                         break
-
-                # Save
-                if (epoch + 1) % self.configs.save_interval == 0 or (epoch + 1) == self.configs.finetune_epochs:
-                    save_checkpoint(
-                        model=self.model,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                        epoch=epoch + 1,
-                        config=self.configs.__dict__,
-                        filepath=os.path.join(self.configs.checkpoint_dir, f'downstream_{trial+1}_epoch_{epoch+1}.pth')
-                    )
 
         # Final save
         final_path = os.path.join(self.configs.checkpoint_dir, 'downstream_final.pth')
@@ -153,6 +167,6 @@ class AdaptTrainer:
             loss, acc = train_node_cls(self.train_loaders[trial], optimizer, self.model, self.device)
         elif self.task_type == 'graph_cls':
             loss, acc = train_graph_cls(self.train_loaders[trial], optimizer, self.model, self.device)
-        elif self.task_type == 'edge_cls':
+        elif self.task_type == 'link_cls':
             pass
         return loss, acc

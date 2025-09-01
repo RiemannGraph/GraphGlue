@@ -285,6 +285,7 @@ class RenameFromRootedEgoNets(BaseTransform):
         batch_graph_nums = ego_net_data.x.shape[0]
         data.batch_graph_nums = batch_graph_nums
         data.x = ego_net_data.x[ego_net_data.n_id]
+        data.y = ego_net_data.y[ego_net_data.n_id]
         data.edge_index = ego_net_data.sub_edge_index
         data.edge_weight = ego_net_data.edge_weight[ego_net_data.e_id]
         data.batch = ego_net_data.n_sub_batch

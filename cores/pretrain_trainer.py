@@ -205,83 +205,83 @@ class Pretrainer:
 
     @torch.no_grad()
     def register_from_loaders(self):
-        # if self.final_model_path:
-        #     load_checkpoint(self.final_model_path, self.model, map_location='cuda' if torch.cuda.is_available() else 'cpu')
-        # self.model.eval()
-        # proto_z_list = []
-        # proto_z_tan_list = []
-        #
-        num_node_level_datasets = len(self.pretrain_single_graph_data)
-        # if num_node_level_datasets > 0:
-        #     for data_name in self.pretrain_single_graph_data:
-        #         z_parts, z_tan_parts = [], []
-        #         loader = self._create_node_loader(data_name)
-        #         for data in loader:
-        #             data = data.to(self.model.device)
-        #             z, z_tan = self.model(data, data.batch_graph_nums)
-        #             z_parts.append(z[: loader.batch_size].cpu())
-        #             z_tan_parts.append(z_tan[: loader.batch_size].cpu())
-        #
-        #         z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)  # [1, d]
-        #         z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
-        #         proto_z_list.append(z_proto)
-        #         proto_z_tan_list.append(z_tan_proto)
-        #
-        #         del loader
-        #         gc.collect()
-        #
-        num_graph_level_datasets = len(self.pretrain_multi_graph_data)
-        # if num_graph_level_datasets > 0:
-        #     for data_name in self.pretrain_multi_graph_data:
-        #         z_parts, z_tan_parts = [], []
-        #         loader = self._create_graph_loader(data_name)
-        #         for data in loader:
-        #             data = data.to(self.device)
-        #             z, z_tan = self.model(data, data.batch_size)
-        #             z_parts.append(z.cpu())
-        #             z_tan_parts.append(z_tan.cpu())
-        #         z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)
-        #         z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
-        #         proto_z_list.append(z_proto)
-        #         proto_z_tan_list.append(z_tan_proto)
-        #
-        #         del loader
-        #         gc.collect()
-        #
-        # if not proto_z_list:
-        #     raise ValueError("No loaders provided or no data processed.")
-        #
-        # final_proto_z = torch.cat(proto_z_list, dim=0)  # [K, d]
-        # final_proto_z_tan = torch.cat(proto_z_tan_list, dim=0)  # [K, M, d]
-        # self.model.register_prototypes(final_proto_z, final_proto_z_tan)
+        if self.final_model_path:
+            load_checkpoint(self.final_model_path, self.model, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.eval()
+        proto_z_list = []
+        proto_z_tan_list = []
 
-        """just for debug downstream"""
-        num_datasets = num_node_level_datasets + num_graph_level_datasets
-        final_proto_z = torch.randn(num_datasets, 256)
-        final_proto_z_tan = torch.randn(num_datasets, 128, 256)
+        num_node_level_datasets = len(self.pretrain_single_graph_data)
+        if num_node_level_datasets > 0:
+            for data_name in self.pretrain_single_graph_data:
+                z_parts, z_tan_parts = [], []
+                loader = self._create_node_loader(data_name)
+                for data in loader:
+                    data = data.to(self.model.device)
+                    z, z_tan = self.model(data, data.batch_graph_nums)
+                    z_parts.append(z[: loader.batch_size].cpu())
+                    z_tan_parts.append(z_tan[: loader.batch_size].cpu())
+
+                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)  # [1, d]
+                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
+                proto_z_list.append(z_proto)
+                proto_z_tan_list.append(z_tan_proto)
+
+                del loader
+                gc.collect()
+
+        num_graph_level_datasets = len(self.pretrain_multi_graph_data)
+        if num_graph_level_datasets > 0:
+            for data_name in self.pretrain_multi_graph_data:
+                z_parts, z_tan_parts = [], []
+                loader = self._create_graph_loader(data_name)
+                for data in loader:
+                    data = data.to(self.device)
+                    z, z_tan = self.model(data, data.batch_size)
+                    z_parts.append(z.cpu())
+                    z_tan_parts.append(z_tan.cpu())
+                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)
+                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
+                proto_z_list.append(z_proto)
+                proto_z_tan_list.append(z_tan_proto)
+
+                del loader
+                gc.collect()
+
+        if not proto_z_list:
+            raise ValueError("No loaders provided or no data processed.")
+
+        final_proto_z = torch.cat(proto_z_list, dim=0)  # [K, d]
+        final_proto_z_tan = torch.cat(proto_z_tan_list, dim=0)  # [K, M, d]
         self.model.register_prototypes(final_proto_z, final_proto_z_tan)
-        final_model_path = os.path.join(
-            self.configs.checkpoint_dir,
-            'pretrain_final_model.pth'
-        )
-        optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=self.configs.lr_pretrain,
-            weight_decay=self.configs.pretrain_weight_decay
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.configs.pretrain_epochs,
-            eta_min=self.configs.lr_pretrain * 0.01
-        )
-        save_checkpoint(
-            model=self.model,
-            config=self.configs.__dict__,
-            filepath=final_model_path,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=0
-        )
+
+        # """just for debug downstream"""
+        # num_datasets = num_node_level_datasets + num_graph_level_datasets
+        # final_proto_z = torch.randn(num_datasets, 256)
+        # final_proto_z_tan = torch.randn(num_datasets, 128, 256)
+        # self.model.register_prototypes(final_proto_z, final_proto_z_tan)
+        # final_model_path = os.path.join(
+        #     self.configs.checkpoint_dir,
+        #     'pretrain_final_model.pth'
+        # )
+        # optimizer = torch.optim.Adam(
+        #     self.model.parameters(),
+        #     lr=self.configs.lr_pretrain,
+        #     weight_decay=self.configs.pretrain_weight_decay
+        # )
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer,
+        #     T_max=self.configs.pretrain_epochs,
+        #     eta_min=self.configs.lr_pretrain * 0.01
+        # )
+        # save_checkpoint(
+        #     model=self.model,
+        #     config=self.configs.__dict__,
+        #     filepath=final_model_path,
+        #     optimizer=optimizer,
+        #     scheduler=scheduler,
+        #     epoch=0
+        # )
         return self.model
 
     def _create_node_loader(self, data_name):

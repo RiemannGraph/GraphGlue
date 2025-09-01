@@ -26,14 +26,13 @@ class AdaptionConfig(ModelConfig):
     num_test: float = 0.2
 
     # Training
-    align_coef: float = 1.0
+    align_coef: float = 0.1
     batch_size: int = 128
     lr_task: float = 1e-3
     task_weight_decay: float = 1e-5
     task_epochs: int = 500
     max_grad_norm: float = 1.0
-    log_interval: int = 10
-    save_interval: int = 10
+    eval_interval: int = 10
     resume_checkpoint: bool = False
     patience: int = 20
 
@@ -65,14 +64,13 @@ def get_pretrain_parser():
     parser.add_argument("--num_test", type=float, default=0.2, help="Proportion of test set.")
 
     # Training
-    parser.add_argument("--align_coef", type=float, default=1.0, help="Coefficient for alignment loss.")
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for task training.")
+    parser.add_argument("--align_coef", type=float, default=0.1, help="Coefficient for alignment loss.")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for task training.")
     parser.add_argument("--lr_task", type=float, default=1e-3, help="Learning rate for task model.")
     parser.add_argument("--task_weight_decay", type=float, default=1e-5, help="Weight decay for task optimizer.")
     parser.add_argument("--task_epochs", type=int, default=500, help="Number of epochs for task training.")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Maximum gradient norm for clipping.")
-    parser.add_argument("--log_interval", type=int, default=10, help="Log every N epochs.")
-    parser.add_argument("--save_interval", type=int, default=10, help="Save checkpoint every N epochs.")
+    parser.add_argument("--eval_interval", type=int, default=10, help="Log every N epochs.")
     parser.add_argument("--resume_checkpoint", action="store_true", help="Whether to resume from checkpoint.")
     parser.add_argument("--patience", type=int, default=20, help="Patience for early stopping.")
 

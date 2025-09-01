@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
-from torch_geometric.data import Data
-
 from cores.loss_funcs import PTGBLoss
 from cores.models import RPGraphFM, FeedForwardLayer
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Data
 
 
 class RPGPrompt(nn.Module):
@@ -25,17 +23,13 @@ class RPGPrompt(nn.Module):
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
         self.pretrained_model = pretrained_model
         self.prompt = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
+        nn.init.kaiming_normal_(self.prompt.data)
         self.align_coef = configs.align_coef
         num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
         self.gated_func = FeedForwardLayer(configs.hid_dim, configs.hid_dim, num_datasets,
                                            configs.bias, configs.act_str, configs.drop)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
-        if task_type == "node_cls":
-            self.head = NodeClassificationAdapter(configs.hid_dim, num_cls)
-        elif task_type == "graph_cls":
-            self.head = GraphClassificationAdapter(configs.hid_dim, num_cls)
-        elif task_type == "edge_cls":
-            self.head = LinkClassificationAdapter(configs.hid_dim, num_cls)
+        self.head = ADAPTERS[task_type](configs.hid_dim, num_cls)
 
     def forward(self, graph: Data, batch_graph_nums: int = None):
         if batch_graph_nums is None:
@@ -43,9 +37,11 @@ class RPGPrompt(nn.Module):
                 batch_graph_nums = graph.batch_graph_nums
             else:
                 batch_graph_nums = graph.batch_size
+        graph = graph.clone()
+        graph.x = self.input_lin(graph.x)
         z, z_tan = self.pretrained_model(graph, batch_graph_nums)
         weights = self.gated_func(z)    # [*, K]
-        z_tan_align = weights @ self.pretrained_model.proto_z_tan   # [*, M, d]
+        z_tan_align = torch.einsum('ij,jkl->ikl', weights, self.pretrained_model.proto_z_tan)   # [*, M, d]
         z_tan_adapt = z_tan @ self.prompt
         align_loss = self.align_coef * torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
         ptgb_loss = self.ptg_loss(z_tan_align)
@@ -62,7 +58,7 @@ class NodeClassificationAdapter(nn.Module):
         self.head = nn.Linear(hid_dim, num_classes)
 
     def forward(self, z: torch.Tensor, graph: Data):
-        return self.head(z[: graph.batch_size])  # Only use labeled nodes in few-shot
+        return self.head(z)  # Only use labeled nodes in few-shot
 
 
 class GraphClassificationAdapter(nn.Module):
