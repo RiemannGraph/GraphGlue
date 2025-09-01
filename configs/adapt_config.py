@@ -22,8 +22,8 @@ class AdaptionConfig(ModelConfig):
     task_types: List[str] = None
     k_shot: int = 5
     num_trials: int = 10
-    num_val: float = 0.1
-    num_test: float = 0.2
+    num_val: float = 0.5
+    num_test: float = 0.5
 
     # Training
     align_coef: float = 0.1
@@ -36,14 +36,11 @@ class AdaptionConfig(ModelConfig):
     resume_checkpoint: bool = False
     patience: int = 20
 
-    # Paths
-    log_path: str = f"logs/{task_type}/{k_shot}-shot/{data_name}.log"
-    checkpoint_dir: str = f"checkpoints/{task_type}/{k_shot}-shot/{data_name}/"
-
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
-    parser.add_argument("--data_name", type=str, default="PubMed", help="Name of the dataset.")
+    parser.add_argument("--data_name", type=str, default="HIV",
+                        help="Name of the dataset. [PubMed, Computers, FacebookPagePage, PROTEINS, HIV] ")
     parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
                         help="file path of pretrained model checkpoint.")
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 10],
@@ -56,7 +53,7 @@ def get_pretrain_parser():
     parser.add_argument("--k_hops", type=int, default=2, help="Number of hops for subgraph extraction.")
 
     # Task
-    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_pred"],
+    parser.add_argument("--task_type", type=str, default="graph_cls", choices=["node_cls", "graph_cls", "link_pred"],
                         help="Type of downstream task.")
     parser.add_argument("--k_shot", type=int, default=5, help="Number of shots in few-shot learning.")
     parser.add_argument("--num_trials", type=int, default=10, help="Number of independent trials.")
@@ -120,13 +117,16 @@ def parse_adaption_config() -> AdaptionConfig:
         task_weight_decay=args.task_weight_decay,
         task_epochs=args.task_epochs,
         max_grad_norm=args.max_grad_norm,
-        log_interval=args.log_interval,
-        save_interval=args.save_interval,
+        eval_interval=args.eval_interval,
         resume_checkpoint=args.resume_checkpoint,
         patience=args.patience
     )
 
     if args.config_save_path:
         save_config_to_yaml(config, args.config_save_path)
+
+    # Paths
+    config.log_path = f"logs/{config.task_type}/{config.k_shot}-shot/{config.data_name}.log"
+    config.checkpoint_dir = f"checkpoints/{config.task_type}/{config.k_shot}-shot/{config.data_name}/"
 
     return config

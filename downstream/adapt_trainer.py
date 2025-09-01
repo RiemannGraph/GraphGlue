@@ -13,19 +13,23 @@ from utils.checkpoints import (
     cleanup_old_checkpoints,
     EarlyStopping
 )
-from data.data_loader import load_few_shot_multi_graph_data, load_few_shot_single_graph_data
+from data.data_loader import (
+    load_few_shot_multi_graph_data,
+    load_few_shot_single_graph_data,
+    load_few_shot_link_graph_data
+)
 from downstream.tasks import (
     train_node_cls,
     evaluate_node_cls,
     train_graph_cls,
     evaluate_graph_cls,
     train_link_cls,
-    eval_link_cls
+    evaluate_link_cls
 )
 from downstream.adapter import RPGPrompt
 from utils.logger import create_logger
 from torch_geometric.transforms import RootedEgoNets, Compose
-from data.data_process import RenameFromRootedEgoNets
+from data.data_transform import RenameFromRootedEgoNets
 
 
 class AdaptTrainer:
@@ -38,7 +42,7 @@ class AdaptTrainer:
         self.val_loaders = []
         self.test_loaders = []
         if configs.task_type == "node_cls":
-            self.dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
+            dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
                                                            configs.num_val, configs.num_test)
             for t in range(self.configs.num_trials):
@@ -61,19 +65,24 @@ class AdaptTrainer:
                                                                      RenameFromRootedEgoNets()])
                                                   ))
         elif configs.task_type == "graph_cls":
-            self.dataset = load_few_shot_multi_graph_data(configs, configs.data_name,
+            dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
                                                            configs.num_val, configs.num_test)
-            #DOTO:
-            self.train_loader = DataLoader(self.dataset, batch_size=configs.batch_size, shuffle=True)
+            for t in range(self.configs.num_trials):
+                self.train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True))
+                self.val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
+                self.test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
+
         elif configs.task_type == "link_cls":
-            pass
+            dataset, data = load_few_shot_link_graph_data(configs, configs.data_name, configs.k_shot, configs.num_val, configs.num_test)
+        else:
+            raise NotImplementedError
 
         pretrained_model = RPGraphFM(configs)
         load_checkpoint(configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
-        self.model = RPGPrompt(configs, self.dataset.num_features,
+        self.model = RPGPrompt(configs, dataset.num_features,
                                pretrained_model, configs.task_type,
-                               self.dataset.num_classes
+                               dataset.num_classes
                                ).to(self.device)
         self.model.pretrained_model.frozen()
 

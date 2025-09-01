@@ -70,21 +70,3 @@ def load_config_from_yaml(filepath: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Config file not found: {filepath}")
     with open(filepath, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
-
-
-# def add_training_config(parser: ArgumentParser):
-#     """Add common training arguments"""
-#     group = parser.add_argument_group("Training Parameters")
-#     group.add_argument('--batch_size', type=int, default=128)
-#     group.add_argument('--num_workers', type=int, default=0)
-#     group.add_argument('--max_grad_norm', type=float, default=1.0)
-#     group.add_argument('--log_interval', type=int, default=10)
-#     return parser
-#
-# def add_path_config(parser: ArgumentParser):
-#     """Add path-related arguments"""
-#     group = parser.add_argument_group("Paths")
-#     group.add_argument('--root', type=str, default='./datasets')
-#     group.add_argument('--log_path', type=str, default='logs/default.log')
-#     group.add_argument('--checkpoint_dir', type=str, default='checkpoints/')
-#     return parser

@@ -1,10 +1,10 @@
+import numpy as np
 import torch
 import torch.optim as optim
 from typing import Dict, Any, Tuple, Optional
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Dataset
 from torch_geometric.nn.kge import TransE, ComplEx, DistMult, RotatE
 from torch_geometric.utils import degree, to_undirected, is_undirected
-from torch_geometric.transforms import BaseTransform
 
 
 class KGNodeInitializer:
@@ -218,15 +218,6 @@ def search_adjacent_edges(edge_index, num_samples=None):
     return paths.t().contiguous()
 
 
-class UnifyFeatureDims(BaseTransform):
-    def __init__(self, uni_dim: int):
-        self.uni_dim = uni_dim
-
-    def forward(self, data: Data):
-        data.x = unify_feature_dimension(data.x, self.uni_dim)
-        return data
-
-
 def unify_feature_dimension(
         x,
         uni_dim: int,
@@ -273,21 +264,172 @@ def unify_feature_dimension(
     return x_reduced
 
 
-class RenameFromRootedEgoNets(BaseTransform):
-    """
-    Rename the attribute of neighbor-sampled graph from RootedEgoNets.
-    """
-    def __init__(self):
-        super().__init__()
+def graph_few_shot_splits(dataset, k_shot, num_val, num_splits):
+    train_masks, val_masks, test_masks = [], [], []
+    for _ in range(num_splits):
+        train_mask, val_mask, test_mask = _graph_few_shot_one_split(dataset, k_shot, num_val)
+        train_masks.append(train_mask)
+        val_masks.append(val_mask)
+        test_masks.append(test_mask)
+    train_mask = torch.stack(train_masks, dim=1)
+    val_mask = torch.stack(val_masks, dim=1)
+    test_mask = torch.stack(test_masks, dim=1)
+    return train_mask, val_mask, test_mask
 
-    def forward(self, ego_net_data):
-        data = Data()
-        batch_graph_nums = ego_net_data.x.shape[0]
-        data.batch_graph_nums = batch_graph_nums
-        data.x = ego_net_data.x[ego_net_data.n_id]
-        data.y = ego_net_data.y[ego_net_data.n_id]
-        data.edge_index = ego_net_data.sub_edge_index
-        data.edge_weight = ego_net_data.edge_weight[ego_net_data.e_id]
-        data.batch = ego_net_data.n_sub_batch
-        data.origin_edge_index = ego_net_data.edge_index
-        return data
+
+def _graph_few_shot_one_split(dataset, k_shot=5, num_val=0.5) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Returns:
+        dataset_train, dataset_val, dataset_test
+    """
+
+    labels = [data.y.item() for data in dataset]
+    num_classes = len(set(labels))
+    num_graphs = len(dataset)
+
+    label_to_indices = [[] for _ in range(num_classes)]
+    for idx, y in enumerate(labels):
+        label_to_indices[y].append(idx)
+
+    for y in range(num_classes):
+        if len(label_to_indices[y]) < k_shot:
+            raise ValueError(f"Class {y} has only {len(label_to_indices[y])} graphs, but k_shot={k_shot}")
+
+    train_indices = []
+    remaining_indices = []
+
+    for y in range(num_classes):
+        indices = np.array(label_to_indices[y])
+        np.random.shuffle(indices)
+        train_indices.extend(indices[:k_shot].tolist())
+        remaining_indices.extend(indices[k_shot:].tolist())
+
+    val_size = int(len(remaining_indices) * num_val)
+    np.random.shuffle(remaining_indices)
+
+    val_indices = remaining_indices[:val_size]
+    test_indices = remaining_indices[val_size:]
+
+    print(f"Total graphs: {num_graphs}")
+    print(f"Train (support): {len(train_indices)} graphs ({k_shot} per class)")
+    print(f"Val: {len(val_indices)} graphs")
+    print(f"Test: {len(test_indices)} graphs")
+    print(f"Val ratio in remaining: {len(val_indices) / (len(val_indices) + len(test_indices)):.2f}")
+
+    train_mask = np.zeros(len(dataset), dtype=bool)
+    val_mask = np.zeros(len(dataset), dtype=bool)
+    test_mask = np.zeros(len(dataset), dtype=bool)
+    train_mask[train_indices] = True
+    val_mask[val_indices] = True
+    test_mask[test_indices] = True
+
+    train_mask = torch.tensor(train_mask, dtype=torch.bool)
+    val_mask = torch.tensor(val_mask, dtype=torch.bool)
+    test_mask = torch.tensor(test_mask, dtype=torch.bool)
+
+    return train_mask, val_mask, test_mask
+
+
+def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_test=0.2):
+    """
+    :return list of (train_data, val_data, test_data) for each split
+    """
+
+    edge_index = data.edge_index  # [2, num_edges]
+    edge_type = data.edge_type  # [num_edges,]
+    num_relations = int(edge_type.max().item() + 1)
+
+    all_splits = []
+    for _ in range(num_splits):
+        train_edges = []
+        train_edge_types = []
+        val_edges = []
+        val_edge_types = []
+        test_edges = []
+        test_edge_types = []
+
+        for rel in range(num_relations):
+            mask = (edge_type == rel)
+            rel_edges = edge_index[:, mask]
+            rel_edge_types = edge_type[mask]
+
+            rel_edges = rel_edges.t().cpu().numpy()
+            unique_edges, unique_indices = np.unique(rel_edges, axis=0, return_index=True)
+            rel_edges = torch.tensor(rel_edges).t()  # back to tensor
+            rel_edge_types = rel_edge_types[unique_indices]
+
+            num_rel_edges = rel_edges.shape[1]
+            k = min(k_shot, num_rel_edges)
+
+            remaining_edges = rel_edges
+            remaining_types = rel_edge_types
+
+            if k > 0:
+                perm = torch.randperm(num_rel_edges)
+                train_idx = perm[:k]
+                train_edges.append(rel_edges[:, train_idx])
+                train_edge_types.append(rel_edge_types[train_idx])
+
+                if num_rel_edges > k:
+                    remaining_edges = rel_edges[:, perm[k:]]
+                    remaining_types = rel_edge_types[perm[k:]]
+                else:
+                    remaining_edges = torch.empty((2, 0), dtype=torch.long)
+                    remaining_types = torch.empty((0,), dtype=torch.long)
+
+            num_remaining = remaining_edges.shape[1]
+            if num_remaining == 0:
+                val_edges_rel, test_edges_rel = torch.empty((2, 0)), torch.empty((2, 0))
+                val_types_rel, test_types_rel = torch.empty(0), torch.empty(0)
+            else:
+                val_ratio = num_val / (num_val + num_test)
+                val_size = int(num_remaining * val_ratio)
+
+                perm_remaining = torch.randperm(num_remaining)
+                val_idx = perm_remaining[:val_size]
+                test_idx = perm_remaining[val_size:]
+
+                val_edges_rel = remaining_edges[:, val_idx]
+                test_edges_rel = remaining_edges[:, test_idx]
+                val_types_rel = remaining_types[val_idx]
+                test_types_rel = remaining_types[test_idx]
+
+            val_edges.append(val_edges_rel)
+            val_edge_types.append(val_types_rel)
+            test_edges.append(test_edges_rel)
+            test_edge_types.append(test_types_rel)
+
+        def safe_cat(tensors, dim=1):
+            tensors = [t for t in tensors if t.shape[dim] > 0]
+            return torch.cat(tensors, dim=dim) if len(tensors) > 0 else torch.empty((2, 0), dtype=torch.long)
+
+        train_edge_index = safe_cat(train_edges, dim=1)
+        val_edge_index = safe_cat(val_edges, dim=1)
+        test_edge_index = safe_cat(test_edges, dim=1)
+
+        train_edge_type = safe_cat(train_edge_types, dim=0)
+        val_edge_type = safe_cat(val_edge_types, dim=0)
+        test_edge_type = safe_cat(test_edge_types, dim=0)
+
+        train_data = Data(
+            edge_index=data.edge_index,
+            edge_type=data.edge_type,
+            edge_label_index=train_edge_index,
+            edge_label=train_edge_type,
+        )
+
+        val_data = Data(
+            edge_index=data.edge_index,
+            edge_type=data.edge_type,
+            edge_label_index=val_edge_index,
+            edge_label=val_edge_type,
+        )
+
+        test_data = Data(
+            edge_index=data.edge_index,
+            edge_type=data.edge_type,
+            edge_label_index=test_edge_index,
+            edge_label=test_edge_type,
+        )
+        all_splits.append((train_data, val_data, test_data))
+    return all_splits

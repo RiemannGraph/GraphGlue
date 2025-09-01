@@ -31,10 +31,6 @@ class PretrainConfig(ModelConfig):
     # Loss & Graph
     knn: int = 15
 
-    # Paths
-    log_path: str = "logs/pretrain/pretrain.log"
-    checkpoint_dir: str = "checkpoints/pretrain/"
-
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
@@ -122,4 +118,7 @@ def parse_pretrain_config() -> PretrainConfig:
     if args.config_save_path:
         save_config_to_yaml(config, args.config_save_path)
 
+    # Path
+    config.log_path = "logs/pretrain/pretrain.log"
+    config.checkpoint_dir = "checkpoints/pretrain/"
     return config

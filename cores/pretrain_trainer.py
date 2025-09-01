@@ -7,7 +7,7 @@ from utils.checkpoints import save_checkpoint, load_checkpoint, get_latest_check
 import os
 from typing import List
 from torch_geometric.transforms import RootedEgoNets, Compose
-from data.data_process import RenameFromRootedEgoNets
+from data.data_transform import RenameFromRootedEgoNets
 import time
 import gc
 import warnings

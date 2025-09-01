@@ -108,7 +108,7 @@ def train_link_cls(train_loader, optimizer, model: RPGPrompt, device):
     return loss
 
 
-def eval_link_cls(loader, model: RPGPrompt, device):
+def evaluate_link_cls(loader, model: RPGPrompt, device):
     total_loss = 0.
     with torch.no_grad():
         for batch_idx, data in enumerate(loader):
