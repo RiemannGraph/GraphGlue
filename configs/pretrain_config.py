@@ -11,9 +11,16 @@ class PretrainConfig(ModelConfig):
     num_neighbors: List[int] = None
 
     root: str = "./datasets"
-    kg_model: str = "transe"
-    kg_batch_size: int = 1024
-    kg_epochs: int = 500
+
+    # For Node2Vec, data like KG that without node features
+    nv_batch_size: int = 128
+    nv_walk_length: int = 20
+    nv_context_size: int = 10
+    nv_lr: float = 0.01
+    nv_walks_per_node: int = 10
+    nv_p: float = 1.0
+    nv_q: float = 1.0
+    nv_num_epochs: int = 100
 
     k_hops: int = 2
     batch_size: int = 128
@@ -37,10 +44,25 @@ def get_pretrain_parser():
 
     # Data
     parser.add_argument('--root', type=str, default="./datasets")
-    parser.add_argument('--kg_model', type=str, default="transe",
-                        choices=['transe', 'complex', 'distmult', 'rotate'], help="Knowledge Graph Model for KG embedding")
-    parser.add_argument('--kg_batch_size', type=int, default=1024, help="batch size to training kg_model")
-    parser.add_argument('--kg_epochs', type=int, default=500, help="number of training kg_model epochs")
+
+    # Node2Vec parameters (for KGs without node features)
+    parser.add_argument('--nv_batch_size', type=int, default=128,
+                        help='Batch size for Node2Vec training (default: 128)')
+    parser.add_argument('--nv_walk_length', type=int, default=20,
+                        help='Length of random walks in Node2Vec (default: 20)')
+    parser.add_argument('--nv_context_size', type=int, default=10,
+                        help='Context size for context-target prediction (default: 10)')
+    parser.add_argument('--nv_lr', type=float, default=0.01,
+                        help='Learning rate for Node2Vec optimizer (default: 0.01)')
+    parser.add_argument('--nv_walks_per_node', type=int, default=10,
+                        help='Number of random walks per node (default: 10)')
+    parser.add_argument('--nv_p', type=float, default=1.0,
+                        help='Return parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_q', type=float, default=1.0,
+                        help='In-out parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_num_epochs', type=int, default=100,
+                        help='Number of epochs to train Node2Vec (default: 100)')
+
     parser.add_argument('--num_neighbors', type=int, nargs='+', default=[5, 2],
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
@@ -100,9 +122,16 @@ def parse_pretrain_config() -> PretrainConfig:
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,
         root=args.root,
-        kg_model=args.kg_model,
-        kg_batch_size=args.kg_batch_size,
-        kg_epochs=args.kg_epochs,
+
+        nv_batch_size=args.nv_batch_size,
+        nv_walk_length=args.nv_walk_length,
+        nv_context_size=args.nv_context_size,
+        nv_lr=args.nv_lr,
+        nv_walks_per_node=args.nv_walks_per_node,
+        nv_p=args.nv_p,
+        nv_q=args.nv_q,
+        nv_num_epochs=args.nv_num_epochs,
+
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pretrain_epochs=args.pretrain_epochs,

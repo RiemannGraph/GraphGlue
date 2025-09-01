@@ -1,9 +1,11 @@
 from typing import Optional
-
+from torch_geometric.nn import Node2Vec
+from torch_geometric.utils import to_undirected
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.data import Data, Dataset
 import torch
-from data.data_process import unify_feature_dimension, KGNodeInitializer, link_k_shot_split
+from data.data_process import unify_feature_dimension, link_k_shot_split
+import os
 
 
 class UnifyFeatureDims(BaseTransform):
@@ -28,10 +30,12 @@ class RenameFromRootedEgoNets(BaseTransform):
         batch_graph_nums = ego_net_data.x.shape[0]
         data.batch_graph_nums = batch_graph_nums
         data.x = ego_net_data.x[ego_net_data.n_id]
-        if ego_net_data.y is not None:
-            data.y = ego_net_data.y[ego_net_data.n_id]
-        if ego_net_data.edge_type is not None:
-            data.edge_type = ego_net_data.edge_type[ego_net_data.e_id]
+        if hasattr(ego_net_data, 'y'):
+            if ego_net_data.y is not None:
+                data.y = ego_net_data.y[ego_net_data.n_id]
+        if hasattr(ego_net_data, 'edge_type'):
+            if ego_net_data.edge_type is not None:
+                data.edge_type = ego_net_data.edge_type[ego_net_data.e_id]
         data.edge_index = ego_net_data.sub_edge_index
         data.edge_weight = ego_net_data.edge_weight[ego_net_data.e_id]
         data.batch = ego_net_data.n_sub_batch
@@ -58,40 +62,53 @@ class FewShotLinkSplit(BaseTransform):
         return data
 
 
-class InitKGNodeFeatures(BaseTransform):
-    def __init__(self, kg_model: str, embed_dim: int,
-                 batch_size: int, epochs: int, device: str = "cuda",
-                 train_data: Optional[Data] = None,
-                 val_data: Optional[Data] = None,
-                 test_data: Optional[Data] = None,):
+class Node2VecEmbedding(BaseTransform):
+    def __init__(self, embed_dim=128, batch_size=128, walk_length=20, context_size=10, lr=0.01,
+                 walks_per_node=10, p=1.0, q=1.0, num_epochs=100, device=None):
         super().__init__()
-        self.kg_model = kg_model
         self.embed_dim = embed_dim
         self.batch_size = batch_size
-        self.epochs = epochs
-        self.device = torch.device(device)
-        self.train_data = train_data
-        self.val_data = val_data
-        self.test_data = test_data
+        self.walk_length = walk_length
+        self.context_size = context_size
+        self.lr = lr
+        self.walks_per_node = walks_per_node
+        self.p = p
+        self.q = q
+        self.num_epochs = num_epochs
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
 
-    def forward(self, data: Data):
-        model = KGNodeInitializer(self.kg_model, device=self.device)
-        train_data = Data(
-            edge_index=data.edge_index[:, data.train_mask],
-            edge_type=data.edge_type[data.train_mask],
-            num_nodes=data.num_nodes
-        ) if self.train_data is None else self.train_data
-        valid_data = Data(
-            edge_index=data.edge_index[:, data.val_mask],
-            edge_type=data.edge_type[data.val_mask],
-            num_nodes=data.num_nodes
-        ) if self.val_data is None else self.val_data
-        test_data = Data(
-            edge_index=data.edge_index[:, data.test_mask],
-            edge_type=data.edge_type[data.test_mask],
-            num_nodes=data.num_nodes
-        ) if self.test_data is None else self.test_data
-        results = model.fit(train_data, valid_data, test_data, self.embed_dim, self.batch_size, self.epochs,
-                            verbose=True)
-        data.x = results["node_embeddings"].detach().cpu()
+    def forward(self, data):
+        edge_index = data.edge_index
+
+        model = Node2Vec(
+            edge_index,
+            embedding_dim=self.embed_dim,
+            walk_length=self.walk_length,
+            context_size=self.context_size,
+            walks_per_node=self.walks_per_node,
+            p=self.p,
+            q=self.q,
+            sparse=True
+        ).to(self.device)
+
+        optimizer = torch.optim.SparseAdam(model.parameters(), lr=self.lr)
+
+        model.train()
+        for epoch in range(1, self.num_epochs + 1):
+            total_loss = 0
+            loader = model.loader(batch_size=self.batch_size, shuffle=True)
+            for pos_rw, neg_rw in loader:
+                optimizer.zero_grad()
+                loss = model.loss(pos_rw.to(self.device), neg_rw.to(self.device))
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            if epoch % 50 == 0:
+                print(f'Node2Vec Epoch {epoch}, Loss: {total_loss / len(loader):.4f}')
+
+        data.x = model.embedding.weight.detach().cpu()
+
         return data
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(dim={self.embed_dim}, epochs={self.num_epochs})'

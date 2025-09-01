@@ -12,11 +12,19 @@ class AdaptionConfig(ModelConfig):
     pretrained_checkpoint: str = "checkpoints/pretrain/pretrain_final_model.pth"
     num_neighbors: List[int] = None
     root: str = "./datasets"
-    kg_model: str = "transe"
-    kg_dim: int = 128
-    kg_batch_size: int = 1024
-    kg_epochs: int = 500
+
     k_hops: int = 2
+    # For Node2Vec, data like KG that without node features
+    nv_dim: int = 128
+    nv_batch_size: int = 128
+    nv_walk_length: int = 20
+    nv_context_size: int = 10
+    nv_lr: float = 0.01
+    nv_walks_per_node: int = 10
+    nv_p: float = 1.0
+    nv_q: float = 1.0
+    nv_num_epochs: int = 100
+
 
     num_workers: int = 2
 
@@ -49,14 +57,25 @@ def get_pretrain_parser():
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 10],
                         help="List of number of neighbors for each hop (e.g., --num_neighbors [10 10]).")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
-    parser.add_argument("--kg_model", type=str, default="transe", choices=["transe", "rotate", "distmult", "complEx"],
-                        help="Knowledge graph embedding model.")
-    parser.add_argument("--kg_dim", type=int, default=128,
-                        help="Knowledge graph embedding dimension.")
-    parser.add_argument("--kg_batch_size", type=int, default=1024,
-                        help="Batch size for KG training.")
-    parser.add_argument("--kg_epochs", type=int, default=500,
-                        help="Number of epochs for KG training.")
+    # Node2Vec parameters (for KGs without node features)
+    parser.add_argument('--nv_dim', type=int, default=128,
+                        help='Node2Vec embedding dimension (default: 128)')
+    parser.add_argument('--nv_batch_size', type=int, default=128,
+                        help='Batch size for Node2Vec training (default: 128)')
+    parser.add_argument('--nv_walk_length', type=int, default=20,
+                        help='Length of random walks in Node2Vec (default: 20)')
+    parser.add_argument('--nv_context_size', type=int, default=10,
+                        help='Context size for context-target prediction (default: 10)')
+    parser.add_argument('--nv_lr', type=float, default=0.01,
+                        help='Learning rate for Node2Vec optimizer (default: 0.01)')
+    parser.add_argument('--nv_walks_per_node', type=int, default=10,
+                        help='Number of random walks per node (default: 10)')
+    parser.add_argument('--nv_p', type=float, default=1.0,
+                        help='Return parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_q', type=float, default=1.0,
+                        help='In-out parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_num_epochs', type=int, default=100,
+                        help='Number of epochs to train Node2Vec (default: 100)')
     parser.add_argument("--k_hops", type=int, default=2,
                         help="Number of hops for subgraph extraction.")
     parser.add_argument('--num_workers', type=int, default=0,
@@ -125,10 +144,17 @@ def parse_adaption_config() -> AdaptionConfig:
         pretrained_checkpoint=args.pretrained_checkpoint,
         num_neighbors=args.num_neighbors,
         root=args.root,
-        kg_model=args.kg_model,
-        kg_batch_size=args.kg_batch_size,
-        kg_epochs=args.kg_epochs,
-        k_hops=args.k_hops,
+
+        nv_dim=args.nv_dim,
+        nv_batch_size=args.nv_batch_size,
+        nv_walk_length=args.nv_walk_length,
+        nv_context_size=args.nv_context_size,
+        nv_lr=args.nv_lr,
+        nv_walks_per_node=args.nv_walks_per_node,
+        nv_p=args.nv_p,
+        nv_q=args.nv_q,
+        nv_num_epochs=args.nv_num_epochs,
+
         task_type=args.task_type,
         k_shot=args.k_shot,
         num_trials=args.num_trials,

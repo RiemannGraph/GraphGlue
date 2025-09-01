@@ -6,7 +6,7 @@ from torch_geometric.datasets import (
     WordNet18RR, TUDataset, MoleculeNet
 )
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_transform import UnifyFeatureDims, InitKGNodeFeatures, FewShotLinkSplit
+from data.data_transform import UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
 from data.data_process import graph_few_shot_splits, link_k_shot_split
 from torch_geometric.data import Dataset
 from torch_geometric.utils import to_undirected
@@ -24,13 +24,11 @@ def load_pretrain_single_graph_data(configs, data_name):
         dataset = Reddit(root)
         data = dataset[0]
     elif data_name == 'FB15k_237':
-        transform = InitKGNodeFeatures(configs.kg_model, configs.in_dim,
-                                       configs.kg_batch_size, configs.kg_epochs,
-                                       train_data=FB15k_237(f"{root}/{data_name}", split='train')[0],
-                                       val_data=FB15k_237(f"{root}/{data_name}", split='val')[0],
-                                       test_data=FB15k_237(f"{root}/{data_name}", split='test')[0]
-        )
-        data = FB15k_237(root, split='train', transform=transform)[0]
+        transform = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
+                                      configs.nv_walk_length, configs.nv_context_size,
+                                      configs.nv_lr, configs.nv_walks_per_node,
+                                      configs.nv_p, configs.nv_q, configs.nv_num_epochs)
+        data = FB15k_237(root, split='train', pre_transform=transform)[0]
     elif data_name == 'PPI':
         dataset = AttributedGraphDataset(root, name=data_name.lower())
         data = dataset[0]
@@ -88,17 +86,19 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
 
 def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
     root = configs.root
-    # pre_transform = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
-    # transform = InitKGNodeFeatures(configs.kg_model, configs.kg_dim, configs.kg_batch_size, configs.kg_epochs)
+    transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+    transform_x = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
+                                      configs.nv_walk_length, configs.nv_context_size,
+                                      configs.nv_lr, configs.nv_walks_per_node,
+                                      configs.nv_p, configs.nv_q, configs.nv_num_epochs)
     if data_name == "WordNet18RR":
-        dataset = WordNet18RR(f"{root}/{data_name}")
+        dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_split, transform_x]))
         data = dataset[0]
     else:
         raise ValueError('Invalid data_name')
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
     train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val, num_test)
-    data.x = torch.randn(data.num_nodes, configs.kg_dim)
     return dataset, data, (train_mask, val_mask, test_mask)
 
 

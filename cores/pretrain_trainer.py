@@ -255,33 +255,6 @@ class Pretrainer:
         final_proto_z_tan = torch.cat(proto_z_tan_list, dim=0)  # [K, M, d]
         self.model.register_prototypes(final_proto_z, final_proto_z_tan)
 
-        # """just for debug downstream"""
-        # num_datasets = num_node_level_datasets + num_graph_level_datasets
-        # final_proto_z = torch.randn(num_datasets, 256)
-        # final_proto_z_tan = torch.randn(num_datasets, 128, 256)
-        # self.model.register_prototypes(final_proto_z, final_proto_z_tan)
-        # final_model_path = os.path.join(
-        #     self.configs.checkpoint_dir,
-        #     'pretrain_final_model.pth'
-        # )
-        # optimizer = torch.optim.Adam(
-        #     self.model.parameters(),
-        #     lr=self.configs.lr_pretrain,
-        #     weight_decay=self.configs.pretrain_weight_decay
-        # )
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        #     optimizer,
-        #     T_max=self.configs.pretrain_epochs,
-        #     eta_min=self.configs.lr_pretrain * 0.01
-        # )
-        # save_checkpoint(
-        #     model=self.model,
-        #     config=self.configs.__dict__,
-        #     filepath=final_model_path,
-        #     optimizer=optimizer,
-        #     scheduler=scheduler,
-        #     epoch=0
-        # )
         return self.model
 
     def _create_node_loader(self, data_name):
