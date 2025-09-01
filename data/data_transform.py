@@ -1,11 +1,8 @@
-from typing import Optional
 from torch_geometric.nn import Node2Vec
-from torch_geometric.utils import to_undirected
 from torch_geometric.transforms import BaseTransform
-from torch_geometric.data import Data, Dataset
+from torch_geometric.data import Data
 import torch
 from data.data_process import unify_feature_dimension, link_k_shot_split
-import os
 
 
 class UnifyFeatureDims(BaseTransform):
