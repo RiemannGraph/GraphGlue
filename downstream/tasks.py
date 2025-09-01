@@ -95,21 +95,30 @@ def evaluate_graph_cls(loader, model: RPGPrompt, device):
 
 def train_link_cls(train_loader, optimizer, model: RPGPrompt, device):
     total_loss = 0.
+    trues = []
+    preds = []
     for batch_idx, data in enumerate(train_loader):
         optimizer.zero_grad()
         data = data.to(device)
-        z, z_tan = model(data, data.batch_graph_nums)
+        z, z_tan, align_loss = model(data, data.batch_graph_nums)
         pred = model.predict(z, data)
-        loss = F.cross_entropy(pred, data.edge_type) + model.loss(z_tan)
+        loss = F.cross_entropy(pred, data.edge_type) + align_loss
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
+        preds.append(pred.detach().cpu().numpy().argmax(-1))
+        trues.append(data.edge_type.detach().cpu().numpy())
+    preds = np.concatenate(preds, axis=-1)
+    trues = np.concatenate(trues, axis=-1)
+    acc = np.sum(preds == trues) / len(preds)
     loss = total_loss / len(train_loader)
-    return loss
+    return loss, acc
 
 
 def evaluate_link_cls(loader, model: RPGPrompt, device):
     total_loss = 0.
+    trues = []
+    preds = []
     with torch.no_grad():
         for batch_idx, data in enumerate(loader):
             data = data.to(device)
@@ -117,5 +126,10 @@ def evaluate_link_cls(loader, model: RPGPrompt, device):
             pred = model.predict(z, data)
             loss = F.cross_entropy(pred, data.edge_type) + align_loss
             total_loss += loss.item()
+            preds.append(pred.detach().cpu().numpy().argmax(-1))
+            trues.append(data.edge_type.detach().cpu().numpy())
+    preds = np.concatenate(preds, axis=-1)
+    trues = np.concatenate(trues, axis=-1)
+    acc = np.sum(preds == trues) / len(preds)
     loss = total_loss / len(loader)
-    return loss
+    return loss, acc

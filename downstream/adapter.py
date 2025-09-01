@@ -81,6 +81,7 @@ class LinkClassificationAdapter(nn.Module):
 
     def forward(self, z: torch.Tensor, graph: Data):
         edge_index = graph.edge_index
+        z = z[graph.n_id]
         src_emb = z[edge_index[0]]
         dst_emb = z[edge_index[1]]
         return self.score_fn(src_emb, dst_emb)
@@ -89,5 +90,5 @@ class LinkClassificationAdapter(nn.Module):
 ADAPTERS = {
     'node_cls': NodeClassificationAdapter,
     'graph_cls': GraphClassificationAdapter,
-    'link_pred': LinkClassificationAdapter,
+    'link_cls': LinkClassificationAdapter,
 }

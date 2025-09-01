@@ -6,11 +6,10 @@ from torch_geometric.datasets import (
     WordNet18RR, TUDataset, MoleculeNet
 )
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_transform import UnifyFeatureDims
-from data.data_process import KGNodeInitializer, graph_few_shot_splits
-from torch_geometric.data import Dataset, Data
+from data.data_transform import UnifyFeatureDims, InitKGNodeFeatures, FewShotLinkSplit
+from data.data_process import graph_few_shot_splits, link_k_shot_split
+from torch_geometric.data import Dataset
 from torch_geometric.utils import to_undirected
-import numpy as np
 
 
 def load_pretrain_single_graph_data(configs, data_name):
@@ -25,14 +24,13 @@ def load_pretrain_single_graph_data(configs, data_name):
         dataset = Reddit(root)
         data = dataset[0]
     elif data_name == 'FB15k_237':
-        device = torch.device('cuda')
-        train_data = FB15k_237(f"{root}/{data_name}", split='train')[0]
-        valid_data = FB15k_237(f"{root}/{data_name}", split='val')[0]
-        test_data = FB15k_237(f"{root}/{data_name}", split='test')[0]
-        model = KGNodeInitializer(configs.kg_model, device=device)
-        results = model.fit(train_data, valid_data, test_data, configs.in_dim, configs.kg_batch_size, configs.kg_epochs, verbose=True)
-        data = FB15k_237(root, split='train')[0]
-        data.x = results["node_embeddings"]
+        transform = InitKGNodeFeatures(configs.kg_model, configs.in_dim,
+                                       configs.kg_batch_size, configs.kg_epochs,
+                                       train_data=FB15k_237(f"{root}/{data_name}", split='train')[0],
+                                       val_data=FB15k_237(f"{root}/{data_name}", split='val')[0],
+                                       test_data=FB15k_237(f"{root}/{data_name}", split='test')[0]
+        )
+        data = FB15k_237(root, split='train', transform=transform)[0]
     elif data_name == 'PPI':
         dataset = AttributedGraphDataset(root, name=data_name.lower())
         data = dataset[0]
@@ -88,8 +86,20 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
     return dataset, train_mask, val_mask, test_mask
 
 
-def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.5, num_test=0.5):
-    return
+def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
+    root = configs.root
+    # pre_transform = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+    # transform = InitKGNodeFeatures(configs.kg_model, configs.kg_dim, configs.kg_batch_size, configs.kg_epochs)
+    if data_name == "WordNet18RR":
+        dataset = WordNet18RR(f"{root}/{data_name}")
+        data = dataset[0]
+    else:
+        raise ValueError('Invalid data_name')
+    if data.edge_weight is None:
+        data.edge_weight = torch.ones_like(data.edge_index[0]).float()
+    train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val, num_test)
+    data.x = torch.randn(data.num_nodes, configs.kg_dim)
+    return dataset, data, (train_mask, val_mask, test_mask)
 
 
 class GraphDataset(Dataset):

@@ -1,7 +1,7 @@
 import os
 import time
 import torch
-from torch_geometric.loader import NeighborLoader, DataLoader, LinkLoader
+from torch_geometric.loader import NeighborLoader, DataLoader, LinkNeighborLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
@@ -38,51 +38,16 @@ class AdaptTrainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logger if logger is not None else create_logger(configs.log_path)
 
-        self.train_loaders = []
-        self.val_loaders = []
-        self.test_loaders = []
-        if configs.task_type == "node_cls":
-            dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
-                                                           configs.k_shot, configs.num_trials,
-                                                           configs.num_val, configs.num_test)
-            for t in range(self.configs.num_trials):
-                self.train_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                         input_nodes=data.train_mask[:, t],
-                                                         shuffle=True, batch_size=configs.batch_size,
-                                                   transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                      RenameFromRootedEgoNets()])
-                                                   ))
-                self.val_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                       input_nodes=data.val_mask[:, t],
-                                                       shuffle=False, batch_size=configs.batch_size,
-                                                 transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                    RenameFromRootedEgoNets()])
-                                                 ))
-                self.test_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                        input_nodes=data.test_mask[:, t],
-                                                        shuffle=False, batch_size=configs.batch_size,
-                                                  transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                                     RenameFromRootedEgoNets()])
-                                                  ))
-        elif configs.task_type == "graph_cls":
-            dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
-                                                           configs.k_shot, configs.num_trials,
-                                                           configs.num_val, configs.num_test)
-            for t in range(self.configs.num_trials):
-                self.train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True))
-                self.val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
-                self.test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
-
-        elif configs.task_type == "link_cls":
-            dataset, data = load_few_shot_link_graph_data(configs, configs.data_name, configs.k_shot, configs.num_val, configs.num_test)
-        else:
-            raise NotImplementedError
+        dataset, loaders, num_classes, num_features = self.get_loaders(configs)
+        self.train_loaders = loaders[0]
+        self.val_loaders = loaders[1]
+        self.test_loaders = loaders[2]
 
         pretrained_model = RPGraphFM(configs)
         load_checkpoint(configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
-        self.model = RPGPrompt(configs, dataset.num_features,
+        self.model = RPGPrompt(configs, num_features,
                                pretrained_model, configs.task_type,
-                               dataset.num_classes
+                               num_classes
                                ).to(self.device)
         self.model.pretrained_model.frozen()
 
@@ -177,5 +142,89 @@ class AdaptTrainer:
         elif self.task_type == 'graph_cls':
             loss, acc = train_graph_cls(self.train_loaders[trial], optimizer, self.model, self.device)
         elif self.task_type == 'link_cls':
-            pass
+            loss, acc = train_link_cls(self.train_loaders[trial], optimizer, self.model, self.device)
         return loss, acc
+
+    def get_loaders(self, configs):
+        num_classes = None
+        num_features = None
+        train_loaders = []
+        val_loaders = []
+        test_loaders = []
+        if configs.task_type == "node_cls":
+            dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
+                                                           configs.k_shot, configs.num_trials,
+                                                           configs.num_val, configs.num_test)
+            num_classes = dataset.num_classes
+            num_features = dataset.num_features
+            for t in range(configs.num_trials):
+                train_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                         input_nodes=data.train_mask[:, t],
+                                                         shuffle=True, batch_size=configs.batch_size,
+                                                   transform=Compose([RootedEgoNets(configs.k_hops),
+                                                                      RenameFromRootedEgoNets()])
+                                                   ))
+                val_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                       input_nodes=data.val_mask[:, t],
+                                                       shuffle=False, batch_size=configs.batch_size,
+                                                 transform=Compose([RootedEgoNets(configs.k_hops),
+                                                                    RenameFromRootedEgoNets()])
+                                                 ))
+                test_loaders.append(NeighborLoader(data, configs.num_neighbors,
+                                                        input_nodes=data.test_mask[:, t],
+                                                        shuffle=False, batch_size=configs.batch_size,
+                                                  transform=Compose([RootedEgoNets(configs.k_hops),
+                                                                     RenameFromRootedEgoNets()])
+                                                  ))
+        elif configs.task_type == "graph_cls":
+            dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
+                                                           configs.k_shot, configs.num_trials,
+                                                           configs.num_val, configs.num_test)
+            num_classes = dataset.num_classes
+            num_features = dataset.num_features
+            for t in range(configs.num_trials):
+                train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True))
+                val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
+                test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
+
+        elif configs.task_type == "link_cls":
+            dataset, data, masks = load_few_shot_link_graph_data(configs, configs.data_name,
+                                                                 configs.k_shot, configs.num_trials,
+                                                                 configs.num_val, configs.num_test)
+            num_classes = len(data.edge_type.unique())
+            num_features = data.x.shape[-1]
+            train_mask, val_mask, test_mask = masks
+            for t in range(configs.num_trials):
+                train_loaders.append(
+                    LinkNeighborLoader(data, shuffle=True, batch_size=configs.batch_size,
+                                       num_workers=configs.num_workers,
+                                       edge_label_index=data.edge_index[:, train_mask[:, t]],
+                                       edge_label=data.edge_type[train_mask[:, t]],
+                                       num_neighbors=configs.num_neighbors,
+                                       transform=Compose([RootedEgoNets(configs.k_hops),
+                                                          RenameFromRootedEgoNets()])
+                                       )
+                )
+                val_loaders.append(
+                    LinkNeighborLoader(data, shuffle=False, batch_size=configs.batch_size,
+                                       num_workers=configs.num_workers,
+                                       edge_label_index=data.edge_index[:, val_mask[:, t]],
+                                       edge_label=data.edge_type[val_mask[:, t]],
+                                       num_neighbors=configs.num_neighbors,
+                                       transform=Compose([RootedEgoNets(configs.k_hops),
+                                                          RenameFromRootedEgoNets()])
+                                       )
+                )
+                test_loaders.append(
+                    LinkNeighborLoader(data, shuffle=False, batch_size=configs.batch_size,
+                                       num_workers=configs.num_workers,
+                                       edge_label_index=data.edge_index[:, test_mask[:, t]],
+                                       edge_label=data.edge_type[test_mask[:, t]],
+                                       num_neighbors=configs.num_neighbors,
+                                       transform=Compose([RootedEgoNets(configs.k_hops),
+                                                          RenameFromRootedEgoNets()])
+                                       )
+                )
+        else:
+            raise NotImplementedError
+        return dataset, (train_loaders, val_loaders, test_loaders), num_classes, num_features

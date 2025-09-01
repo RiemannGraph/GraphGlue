@@ -13,9 +13,12 @@ class AdaptionConfig(ModelConfig):
     num_neighbors: List[int] = None
     root: str = "./datasets"
     kg_model: str = "transe"
+    kg_dim: int = 128
     kg_batch_size: int = 1024
     kg_epochs: int = 500
     k_hops: int = 2
+
+    num_workers: int = 2
 
     # Task
     task_type: str = "node_cls"
@@ -39,8 +42,8 @@ class AdaptionConfig(ModelConfig):
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
-    parser.add_argument("--data_name", type=str, default="HIV",
-                        help="Name of the dataset. [PubMed, Computers, FacebookPagePage, PROTEINS, HIV] ")
+    parser.add_argument("--data_name", type=str, default="WordNet18RR",
+                        help="Name of the dataset. [PubMed, Computers, FacebookPagePage, WordNet18RR, PROTEINS, HIV] ")
     parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
                         help="file path of pretrained model checkpoint.")
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 10],
@@ -48,28 +51,48 @@ def get_pretrain_parser():
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     parser.add_argument("--kg_model", type=str, default="transe", choices=["transe", "rotate", "distmult", "complEx"],
                         help="Knowledge graph embedding model.")
-    parser.add_argument("--kg_batch_size", type=int, default=1024, help="Batch size for KG training.")
-    parser.add_argument("--kg_epochs", type=int, default=500, help="Number of epochs for KG training.")
-    parser.add_argument("--k_hops", type=int, default=2, help="Number of hops for subgraph extraction.")
+    parser.add_argument("--kg_dim", type=int, default=128,
+                        help="Knowledge graph embedding dimension.")
+    parser.add_argument("--kg_batch_size", type=int, default=1024,
+                        help="Batch size for KG training.")
+    parser.add_argument("--kg_epochs", type=int, default=500,
+                        help="Number of epochs for KG training.")
+    parser.add_argument("--k_hops", type=int, default=2,
+                        help="Number of hops for subgraph extraction.")
+    parser.add_argument('--num_workers', type=int, default=0,
+                        help='Number of workers for data loading')
 
     # Task
-    parser.add_argument("--task_type", type=str, default="graph_cls", choices=["node_cls", "graph_cls", "link_pred"],
+    parser.add_argument("--task_type", type=str, default="link_cls", choices=["node_cls", "graph_cls", "link_pred"],
                         help="Type of downstream task.")
-    parser.add_argument("--k_shot", type=int, default=5, help="Number of shots in few-shot learning.")
-    parser.add_argument("--num_trials", type=int, default=10, help="Number of independent trials.")
-    parser.add_argument("--num_val", type=float, default=0.1, help="Proportion of validation set.")
-    parser.add_argument("--num_test", type=float, default=0.2, help="Proportion of test set.")
+    parser.add_argument("--k_shot", type=int, default=5,
+                        help="Number of shots in few-shot learning.")
+    parser.add_argument("--num_trials", type=int, default=10,
+                        help="Number of independent trials.")
+    parser.add_argument("--num_val", type=float, default=0.1,
+                        help="Proportion of validation set.")
+    parser.add_argument("--num_test", type=float, default=0.2,
+                        help="Proportion of test set.")
 
     # Training
-    parser.add_argument("--align_coef", type=float, default=0.1, help="Coefficient for alignment loss.")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for task training.")
-    parser.add_argument("--lr_task", type=float, default=1e-3, help="Learning rate for task model.")
-    parser.add_argument("--task_weight_decay", type=float, default=1e-5, help="Weight decay for task optimizer.")
-    parser.add_argument("--task_epochs", type=int, default=500, help="Number of epochs for task training.")
-    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Maximum gradient norm for clipping.")
-    parser.add_argument("--eval_interval", type=int, default=10, help="Log every N epochs.")
-    parser.add_argument("--resume_checkpoint", action="store_true", help="Whether to resume from checkpoint.")
-    parser.add_argument("--patience", type=int, default=20, help="Patience for early stopping.")
+    parser.add_argument("--align_coef", type=float, default=0.1,
+                        help="Coefficient for alignment loss.")
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Batch size for task training.")
+    parser.add_argument("--lr_task", type=float, default=1e-3,
+                        help="Learning rate for task model.")
+    parser.add_argument("--task_weight_decay", type=float, default=1e-5,
+                        help="Weight decay for task optimizer.")
+    parser.add_argument("--task_epochs", type=int, default=500,
+                        help="Number of epochs for task training.")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0,
+                        help="Maximum gradient norm for clipping.")
+    parser.add_argument("--eval_interval", type=int, default=10,
+                        help="Log every N epochs.")
+    parser.add_argument("--resume_checkpoint", action="store_true",
+                        help="Whether to resume from checkpoint.")
+    parser.add_argument("--patience", type=int, default=20,
+                        help="Patience for early stopping.")
 
     # Config IO
     parser.add_argument('--config_save_path', type=str, default=None,

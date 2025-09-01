@@ -35,26 +35,41 @@ def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
+                        # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "PPI", "FB15k_237"],
                         default=["ogbn-arxiv"],
                         help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
                         help='graph-level pretraining datasets')
-    group.add_argument('--n_layers', type=int, default=3, help='Number of GNN layers')
-    group.add_argument('--num_samples', type=int, default=None, help='Number of adjacent edge samples')
-    group.add_argument('--in_dim', type=int, default=100, help='Input feature dimension')
-    group.add_argument('--hid_dim', type=int, default=256, help='Hidden dimension')
-    group.add_argument('--att_dim', type=int, default=512, help='Attention dimension (if used)')
-    group.add_argument('--num_generators', type=int, default=128, help='Number of generators in FM')
-    group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gat'], help='GNN layer type')
-    group.add_argument('--act_str', type=str, default='gelu', help='Activation function')
-    group.add_argument('--drop', type=float, default=0.1, help='Dropout rate')
-    group.add_argument('--normalize', action='store_true', help='Whether to normalize adjacency matrix')
-    group.add_argument('--bias', action='store_false', help='Whether to add bias term')
-    group.add_argument('--norm_str', type=str, default='layer_norm', choices=['layer_norm', 'batch_norm'])
-    group.add_argument('--temperature', type=float, default=1.0, help='Temperature')
-    group.add_argument('--regular_coef_pt', type=float, default=0.5, help='Regularization coefficient of PT')
-    group.add_argument('--regular_coef_curv', type=float, default=0.5, help='Regularization coefficient of Curvature')
+    group.add_argument('--n_layers', type=int, default=3,
+                       help='Number of GNN layers')
+    group.add_argument('--num_samples', type=int, default=None,
+                       help='Number of adjacent edge samples')
+    group.add_argument('--in_dim', type=int, default=100,
+                       help='Input feature dimension')
+    group.add_argument('--hid_dim', type=int, default=256,
+                       help='Hidden dimension')
+    group.add_argument('--att_dim', type=int, default=512,
+                       help='Attention dimension (if used)')
+    group.add_argument('--num_generators', type=int, default=128,
+                       help='Number of generators in FM')
+    group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gat'],
+                       help='GNN layer type')
+    group.add_argument('--act_str', type=str, default='gelu',
+                       help='Activation function')
+    group.add_argument('--drop', type=float, default=0.1,
+                       help='Dropout rate')
+    group.add_argument('--normalize', action='store_true',
+                       help='Whether to normalize adjacency matrix')
+    group.add_argument('--bias', action='store_false',
+                       help='Whether to add bias term')
+    group.add_argument('--norm_str', type=str, default='layer_norm', choices=['layer_norm', 'batch_norm'],
+                       help="Normalization type")
+    group.add_argument('--temperature', type=float, default=1.0,
+                       help='Temperature')
+    group.add_argument('--regular_coef_pt', type=float, default=0.5,
+                       help='Regularization coefficient of PT')
+    group.add_argument('--regular_coef_curv', type=float, default=0.5,
+                       help='Regularization coefficient of Curvature')
     return parser
 
 

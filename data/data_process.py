@@ -336,100 +336,66 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_test=0.2):
     """
 
     edge_index = data.edge_index  # [2, num_edges]
-    edge_type = data.edge_type  # [num_edges,]
+    edge_type = data.edge_type    # [num_edges,]
+    num_edges = edge_index.size(1)
     num_relations = int(edge_type.max().item() + 1)
 
-    all_splits = []
+    train_masks = []
+    val_masks = []
+    test_masks = []
+
     for _ in range(num_splits):
-        train_edges = []
-        train_edge_types = []
-        val_edges = []
-        val_edge_types = []
-        test_edges = []
-        test_edge_types = []
+        train_indices = []
+        val_indices = []
+        test_indices = []
 
         for rel in range(num_relations):
-            mask = (edge_type == rel)
-            rel_edges = edge_index[:, mask]
-            rel_edge_types = edge_type[mask]
+            rel_mask = (edge_type == rel)
+            rel_indices = rel_mask.nonzero(as_tuple=False).view(-1)  # [num_rel_edges]
+            num_rel_edges = rel_indices.size(0)
 
-            rel_edges = rel_edges.t().cpu().numpy()
-            unique_edges, unique_indices = np.unique(rel_edges, axis=0, return_index=True)
-            rel_edges = torch.tensor(rel_edges).t()  # back to tensor
-            rel_edge_types = rel_edge_types[unique_indices]
+            if num_rel_edges == 0:
+                continue
 
-            num_rel_edges = rel_edges.shape[1]
+            perm = torch.randperm(num_rel_edges)
+            rel_indices_shuffled = rel_indices[perm]
+
             k = min(k_shot, num_rel_edges)
+            train_indices.append(rel_indices_shuffled[:k])
 
-            remaining_edges = rel_edges
-            remaining_types = rel_edge_types
+            remaining_indices = rel_indices_shuffled[k:]
+            num_remaining = remaining_indices.size(0)
 
-            if k > 0:
-                perm = torch.randperm(num_rel_edges)
-                train_idx = perm[:k]
-                train_edges.append(rel_edges[:, train_idx])
-                train_edge_types.append(rel_edge_types[train_idx])
-
-                if num_rel_edges > k:
-                    remaining_edges = rel_edges[:, perm[k:]]
-                    remaining_types = rel_edge_types[perm[k:]]
-                else:
-                    remaining_edges = torch.empty((2, 0), dtype=torch.long)
-                    remaining_types = torch.empty((0,), dtype=torch.long)
-
-            num_remaining = remaining_edges.shape[1]
             if num_remaining == 0:
-                val_edges_rel, test_edges_rel = torch.empty((2, 0)), torch.empty((2, 0))
-                val_types_rel, test_types_rel = torch.empty(0), torch.empty(0)
+                val_split = torch.empty(0, dtype=torch.long)
+                test_split = torch.empty(0, dtype=torch.long)
             else:
                 val_ratio = num_val / (num_val + num_test)
                 val_size = int(num_remaining * val_ratio)
+                val_split = remaining_indices[:val_size]
+                test_split = remaining_indices[val_size:]
 
-                perm_remaining = torch.randperm(num_remaining)
-                val_idx = perm_remaining[:val_size]
-                test_idx = perm_remaining[val_size:]
+            val_indices.append(val_split)
+            test_indices.append(test_split)
 
-                val_edges_rel = remaining_edges[:, val_idx]
-                test_edges_rel = remaining_edges[:, test_idx]
-                val_types_rel = remaining_types[val_idx]
-                test_types_rel = remaining_types[test_idx]
+        train_idx = torch.cat(train_indices) if len(train_indices) > 0 else torch.empty(0, dtype=torch.long)
+        val_idx = torch.cat(val_indices) if len(val_indices) > 0 else torch.empty(0, dtype=torch.long)
+        test_idx = torch.cat(test_indices) if len(test_indices) > 0 else torch.empty(0, dtype=torch.long)
 
-            val_edges.append(val_edges_rel)
-            val_edge_types.append(val_types_rel)
-            test_edges.append(test_edges_rel)
-            test_edge_types.append(test_types_rel)
+        train_mask = torch.zeros(num_edges).bool()
+        val_mask = torch.zeros(num_edges).bool()
+        test_mask = torch.zeros(num_edges).bool()
 
-        def safe_cat(tensors, dim=1):
-            tensors = [t for t in tensors if t.shape[dim] > 0]
-            return torch.cat(tensors, dim=dim) if len(tensors) > 0 else torch.empty((2, 0), dtype=torch.long)
+        train_mask[train_idx] = True
+        val_mask[val_idx] = True
+        test_mask[test_idx] = True
 
-        train_edge_index = safe_cat(train_edges, dim=1)
-        val_edge_index = safe_cat(val_edges, dim=1)
-        test_edge_index = safe_cat(test_edges, dim=1)
+        train_masks.append(train_mask)
+        val_masks.append(val_mask)
+        test_masks.append(test_mask)
 
-        train_edge_type = safe_cat(train_edge_types, dim=0)
-        val_edge_type = safe_cat(val_edge_types, dim=0)
-        test_edge_type = safe_cat(test_edge_types, dim=0)
+    train_mask = torch.stack(train_masks, dim=1)
+    val_mask = torch.stack(val_masks, dim=1)
+    test_mask = torch.stack(test_masks, dim=1)
 
-        train_data = Data(
-            edge_index=data.edge_index,
-            edge_type=data.edge_type,
-            edge_label_index=train_edge_index,
-            edge_label=train_edge_type,
-        )
-
-        val_data = Data(
-            edge_index=data.edge_index,
-            edge_type=data.edge_type,
-            edge_label_index=val_edge_index,
-            edge_label=val_edge_type,
-        )
-
-        test_data = Data(
-            edge_index=data.edge_index,
-            edge_type=data.edge_type,
-            edge_label_index=test_edge_index,
-            edge_label=test_edge_type,
-        )
-        all_splits.append((train_data, val_data, test_data))
-    return all_splits
+    return train_mask, val_mask, test_mask
