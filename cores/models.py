@@ -93,7 +93,6 @@ class RPGraphFM(nn.Module):
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
         self.geo_loss = GeometricPersistLoss(configs.regular_coef_pt, configs.regular_coef_curv)
-        self._is_global_prototypes_registered = False
 
     def forward(self, graph: Data, batch_graph_nums: int = None):
         """
@@ -162,7 +161,25 @@ class RPGraphFM(nn.Module):
         """
         self.register_buffer('proto_z', proto_z)
         self.register_buffer('proto_z_tan', proto_z_tan)
-        self._is_global_prototypes_registered = True
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                              error_msgs):
+        full_prefix = prefix if prefix else ""
+        keys_to_register = []
+
+        if (full_prefix + 'proto_z') in state_dict:
+            keys_to_register.append('proto_z')
+        if (full_prefix + 'proto_z_tan') in state_dict:
+            keys_to_register.append('proto_z_tan')
+        if (full_prefix + 'is_global_prototypes_registered') in state_dict:
+            keys_to_register.append('is_global_prototypes_registered')
+
+        for key in keys_to_register:
+            if not hasattr(self, key):
+                self.register_buffer(key, torch.empty_like(state_dict[full_prefix + key], device='cpu'))
+
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                                      error_msgs)
 
     def frozen(self):
         for param in self.parameters():
@@ -171,10 +188,6 @@ class RPGraphFM(nn.Module):
     def unfrozen(self):
         for param in self.parameters():
             param.requires_grad_(True)
-
-    @property
-    def is_global_prototypes_registered(self):
-        return self._is_global_prototypes_registered
 
     @staticmethod
     def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):

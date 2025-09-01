@@ -9,8 +9,6 @@ from configs.base_config import ModelConfig, add_model_config, load_config_from_
 class PretrainConfig(ModelConfig):
     # Data
     num_neighbors: List[int] = None
-    pretrain_single_graph_data: List[str] = None
-    pretrain_multi_graph_data: List[str] = None
 
     root: str = "./datasets"
     kg_model: str = "transe"
@@ -51,12 +49,6 @@ def get_pretrain_parser():
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
-                        default=["ogbn-arxiv"],
-                        help='node-level pretraining datasets')
-    parser.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
-                        help='graph-level pretraining datasets')
     parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size for data loading')
     parser.add_argument('--num_workers', type=int, default=0,
@@ -81,12 +73,6 @@ def get_pretrain_parser():
     # Loss & Graph
     parser.add_argument('--knn', type=int, default=5,
                         help='KNN graph connections for inter-graph loss')
-
-    # Paths
-    parser.add_argument('--log_path', type=str, default="logs/pretrain/pretrain.log",
-                        help='Path to log file')
-    parser.add_argument('--checkpoint_dir', type=str, default="checkpoints/pretrain/",
-                        help='Directory to save checkpoints')
 
     # Config IO
     parser.add_argument('--config_save_path', type=str, default=None,
@@ -130,9 +116,7 @@ def parse_pretrain_config() -> PretrainConfig:
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         resume_checkpoint=args.resume_checkpoint,
-        knn=args.knn,
-        log_path=args.log_path,
-        checkpoint_dir=args.checkpoint_dir
+        knn=args.knn
     )
 
     if args.config_save_path:

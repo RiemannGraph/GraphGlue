@@ -2,14 +2,14 @@ import argparse
 import sys
 from dataclasses import dataclass
 from typing import List
-from configs.base_config import ModelConfig, load_config_from_yaml, save_config_to_yaml
+from configs.base_config import ModelConfig, load_config_from_yaml, save_config_to_yaml, add_model_config
 
 
 @dataclass
 class AdaptionConfig(ModelConfig):
     # Data
-    data_name: str = None
-    pretrained_checkpoint: str = None
+    data_name: str = "PubMed"
+    pretrained_checkpoint: str = "checkpoints/pretrain/pretrain_final_model.pth"
     num_neighbors: List[int] = None
     root: str = "./datasets"
     kg_model: str = "transe"
@@ -19,8 +19,9 @@ class AdaptionConfig(ModelConfig):
 
     # Task
     task_type: str = "node_cls"
+    task_types: List[str] = None
     k_shot: int = 5
-    num_trails: int = 10
+    num_trials: int = 10
     num_val: float = 0.1
     num_test: float = 0.2
 
@@ -43,10 +44,11 @@ class AdaptionConfig(ModelConfig):
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
-    parser.add_argument("--data_name", type=str, default=None, help="Name of the dataset.")
-    parser.add_argument("--pretrained_checkpoint", type=str, default=None, help="Path to pretrained model checkpoint.")
-    parser.add_argument("--num_neighbors", type=int, nargs="+", default=None,
-                        help="List of number of neighbors for each hop (e.g., --num_neighbors 10 10).")
+    parser.add_argument("--data_name", type=str, default="PubMed", help="Name of the dataset.")
+    parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
+                        help="file path of pretrained model checkpoint.")
+    parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 10],
+                        help="List of number of neighbors for each hop (e.g., --num_neighbors [10 10]).")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     parser.add_argument("--kg_model", type=str, default="transe", choices=["transe", "rotate", "distmult", "complEx"],
                         help="Knowledge graph embedding model.")
@@ -55,10 +57,10 @@ def get_pretrain_parser():
     parser.add_argument("--k_hops", type=int, default=2, help="Number of hops for subgraph extraction.")
 
     # Task
-    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "link_pred"],
+    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_pred"],
                         help="Type of downstream task.")
     parser.add_argument("--k_shot", type=int, default=5, help="Number of shots in few-shot learning.")
-    parser.add_argument("--num_trails", type=int, default=10, help="Number of independent trials.")
+    parser.add_argument("--num_trials", type=int, default=10, help="Number of independent trials.")
     parser.add_argument("--num_val", type=float, default=0.1, help="Proportion of validation set.")
     parser.add_argument("--num_test", type=float, default=0.2, help="Proportion of test set.")
 
@@ -79,6 +81,8 @@ def get_pretrain_parser():
                         help='Path to save current config as YAML (optional)')
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
+
+    add_model_config(parser)
     return parser
 
 
@@ -97,6 +101,8 @@ def parse_adaption_config() -> AdaptionConfig:
                     setattr(args, key, value)
 
     config = AdaptionConfig(
+        pretrain_single_graph_data=args.pretrain_single_graph_data,
+        pretrain_multi_graph_data=args.pretrain_multi_graph_data,
         data_name=args.data_name,
         pretrained_checkpoint=args.pretrained_checkpoint,
         num_neighbors=args.num_neighbors,
@@ -107,7 +113,7 @@ def parse_adaption_config() -> AdaptionConfig:
         k_hops=args.k_hops,
         task_type=args.task_type,
         k_shot=args.k_shot,
-        num_trails=args.num_trails,
+        num_trials=args.num_trials,
         num_val=args.num_val,
         num_test=args.num_test,
         align_coef=args.align_coef,
@@ -119,9 +125,7 @@ def parse_adaption_config() -> AdaptionConfig:
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         resume_checkpoint=args.resume_checkpoint,
-        patience=args.patience,
-        log_path=args.log_path,
-        checkpoint_dir=args.checkpoint_dir
+        patience=args.patience
     )
 
     if args.config_save_path:

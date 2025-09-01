@@ -18,9 +18,9 @@ class RPGPrompt(nn.Module):
         :param num_cls: classes number
         """
         super(RPGPrompt, self).__init__()
-        assert pretrained_model.is_global_prototypes_registered, \
+        assert 'proto_z' in pretrained_model._buffers and 'proto_z_tan' in pretrained_model._buffers, \
             "the global prototype must be stored in pretraining phase."
-        assert task_type in configs.task_types, "the task type must be stored in configs.task_types."
+        assert task_type in ["node_cls", "graph_cls", "link_cls"], "the task type must be one of [node_cls, graph_cls, link_cls]"
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
         self.pretrained_model = pretrained_model

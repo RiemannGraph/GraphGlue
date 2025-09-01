@@ -17,8 +17,8 @@ from torch_geometric.transforms import RootedEgoNets, Compose
 from data.data_process import RenameFromRootedEgoNets
 
 
-class Trainer:
-    def __init__(self, configs, pretrained_model: RPGraphFM, logger=None):
+class AdaptTrainer:
+    def __init__(self, configs, logger=None):
         self.configs = configs
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logger if logger is not None else create_logger(configs.log_path)
@@ -28,10 +28,10 @@ class Trainer:
         self.test_loaders = []
         if configs.task_type == "node_cls":
             self.dataset = load_few_shot_single_graph_data(configs, configs.data_name,
-                                                           configs.k_shot, configs.num_trails,
+                                                           configs.k_shot, configs.num_trials,
                                                            configs.num_val, configs.num_test)
             data = self.dataset[0]
-            for t in range(self.configs.num_trails):
+            for t in range(self.configs.num_trials):
                 self.train_loaders.append(NeighborLoader(data, configs.num_neighbors, input_nodes=data.train_mask[:, t], shuffle=True,
                                                    transform=Compose([RootedEgoNets(self.configs.k_hops),
                                                                       RenameFromRootedEgoNets()])
@@ -46,13 +46,15 @@ class Trainer:
                                                   ))
         elif configs.task_type == "graph_cls":
             self.dataset = load_few_shot_multi_graph_data(configs, configs.data_name,
-                                                           configs.k_shot, configs.num_trails,
+                                                           configs.k_shot, configs.num_trials,
                                                            configs.num_val, configs.num_test)
             #DOTO:
             self.train_loader = DataLoader(self.dataset, batch_size=configs.batch_size, shuffle=True)
         elif configs.task_type == "edge_cls":
             pass
 
+        pretrained_model = RPGraphFM(configs)
+        load_checkpoint(configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
         self.model = RPGPrompt(configs, self.dataset.num_features,
                                pretrained_model, configs.task_type,
                                self.dataset.num_classes
@@ -97,7 +99,7 @@ class Trainer:
             self.model.train()
             for epoch in range(self.start_epoch, self.configs.task_epochs):
                 epoch_start_time = time.time()
-                train_loss, train_acc = self._train_epoch(optimizer)
+                train_loss, train_acc = self._train_epoch(optimizer, trial)
                 scheduler.step()
                 epoch_time = time.time() - epoch_start_time
 
@@ -112,14 +114,12 @@ class Trainer:
                 # Evaluation
                 if (epoch + 1) % self.configs.eval_interval == 0:
                     if self.task_type == 'node_cls':
-                        val_loss, val_acc = evaluate_node_cls(self.val_loader, self.model, self.device)
-                        self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                        val_loss, val_acc = evaluate_node_cls(self.val_loaders[trial], self.model, self.device)
                     elif self.task_type == 'graph_cls':
-                        val_loss, val_acc = evaluate_graph_cls(self.val_loader, self.model, self.device)
-                        self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                        val_loss, val_acc = evaluate_graph_cls(self.val_loaders[trial], self.model, self.device)
                     elif self.task_type == 'edge_cls':
                         pass
-
+                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
                     if early_stopping.step(
                             metric=val_acc,
                             model=self.model,
@@ -146,13 +146,13 @@ class Trainer:
         torch.save({'state_dict': self.model.state_dict()}, final_path)
         self.logger.info(f"Training finished. Final model saved to {final_path}")
 
-    def _train_epoch(self, optimizer):
+    def _train_epoch(self, optimizer, trial):
         loss = None
         acc = None
         if self.task_type == 'node_cls':
-            loss, acc = train_node_cls(self.train_loader, optimizer, self.model, self.device)
+            loss, acc = train_node_cls(self.train_loaders[trial], optimizer, self.model, self.device)
         elif self.task_type == 'graph_cls':
-            loss, acc = train_graph_cls(self.train_loader, optimizer, self.model, self.device)
+            loss, acc = train_graph_cls(self.train_loaders[trial], optimizer, self.model, self.device)
         elif self.task_type == 'edge_cls':
             pass
         return loss, acc

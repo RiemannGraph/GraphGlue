@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from argparse import ArgumentParser
 import yaml
 import os
@@ -7,7 +7,12 @@ import os
 
 @dataclass
 class ModelConfig:
+
+    pretrain_single_graph_data: List[str] = None
+    pretrain_multi_graph_data: List[str] = None
+
     """Shared model architecture configuration"""
+
     n_layers: int = 3
     num_samples: Optional[int] = None
     in_dim: int = 100
@@ -29,6 +34,12 @@ class ModelConfig:
 def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
+    group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
+                        # default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
+                        default=["ogbn-arxiv"],
+                        help='node-level pretraining datasets')
+    group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
+                        help='graph-level pretraining datasets')
     group.add_argument('--n_layers', type=int, default=3, help='Number of GNN layers')
     group.add_argument('--num_samples', type=int, default=None, help='Number of adjacent edge samples')
     group.add_argument('--in_dim', type=int, default=100, help='Input feature dimension')
