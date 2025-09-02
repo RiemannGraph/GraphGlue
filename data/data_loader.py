@@ -1,10 +1,11 @@
 import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import (
-    AmazonProducts, Reddit, FB15k_237, AttributedGraphDataset,
+    AmazonProducts, Reddit, AttributedGraphDataset,
     Planetoid, Amazon, FacebookPagePage,
     WordNet18RR, TUDataset, MoleculeNet
 )
+from data.data_custom import FB15k_237
 from ogb.nodeproppred import PygNodePropPredDataset
 from data.data_transform import UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
 from data.data_process import graph_few_shot_splits, link_k_shot_split
@@ -28,7 +29,8 @@ def load_pretrain_single_graph_data(configs, data_name):
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
-        data = FB15k_237(root, split='train', pre_transform=transform)[0]
+        dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=transform)
+        data = dataset[0]
     elif data_name == 'PPI':
         dataset = AttributedGraphDataset(root, name=data_name.lower())
         data = dataset[0]
