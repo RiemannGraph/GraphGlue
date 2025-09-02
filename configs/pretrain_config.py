@@ -38,6 +38,10 @@ class PretrainConfig(ModelConfig):
     # Loss & Graph
     knn: int = 15
 
+    # Path
+    checkpoint_dir: str = "checkpoints/pretrain/"
+    log_path: str = "logs/pretrain/pretrain.log"
+
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
@@ -63,21 +67,21 @@ def get_pretrain_parser():
     parser.add_argument('--nv_num_epochs', type=int, default=100,
                         help='Number of epochs to train Node2Vec (default: 100)')
 
-    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[5, 2],
+    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[10, 5],
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--batch_size', type=int, default=32,
+    parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for data loading')
-    parser.add_argument('--num_workers', type=int, default=0,
+    parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of workers for data loading')
 
     # Training
     parser.add_argument('--pretrain_epochs', type=int, default=100,
                         help='Total pretrain epochs')
-    parser.add_argument('--lr_pretrain', type=float, default=1e-3,
+    parser.add_argument('--lr_pretrain', type=float, default=3e-4,
                         help='Learning rate for pretraining')
-    parser.add_argument('--pretrain_weight_decay', type=float, default=1e-5,
+    parser.add_argument('--pretrain_weight_decay', type=float, default=0,
                         help='Weight decay for Adam optimizer')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='Max gradient norm for clipping')
@@ -89,12 +93,13 @@ def get_pretrain_parser():
                         help='Whether to resume from latest checkpoint')
 
     # Loss & Graph
-    parser.add_argument('--knn', type=int, default=5,
+    parser.add_argument('--knn', type=int, default=30,
                         help='KNN graph connections for inter-graph loss')
 
     # Config IO
-    parser.add_argument('--config_save_path', type=str, default=None,
-                        help='Path to save current config as YAML (optional)')
+    parser.add_argument('--config_save_path', type=str, default="./scripts/pretrain/pretrain.yaml",
+                        help='Path to save current config as YAML (optional)' \
+                             'default path format is ./scripts/pretrain/pretrain.yaml')
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
 
@@ -146,9 +151,7 @@ def parse_pretrain_config() -> PretrainConfig:
 
     # Path
     config.log_path = "logs/pretrain/pretrain.log"
-    config.checkpoint_dir = "checkpoints/pretrain/"
 
     if args.config_save_path:
         save_config_to_yaml(config, args.config_save_path)
-
     return config

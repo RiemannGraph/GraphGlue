@@ -14,11 +14,11 @@ class ModelConfig:
     """Shared model architecture configuration"""
 
     n_layers: int = 3
-    num_samples: Optional[int] = None
+    num_samples: Optional[int] = 100
     in_dim: int = 100
     hid_dim: int = 256
     att_dim: int = 512
-    num_generators: int = 128
+    num_generators: int = 64
     bias: bool = True
     act_str: str = "gelu"
     drop: float = 0.1
@@ -37,23 +37,24 @@ def add_model_config(parser: ArgumentParser):
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
                         default=["ogbn-arxiv", "AmazonProducts", "Reddit", "PPI", "FB15k_237"],
                         help='node-level pretraining datasets')
-    group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+', default=["PCBA"],
+    group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
+                        default=["PCBA"],
                         help='graph-level pretraining datasets')
-    group.add_argument('--n_layers', type=int, default=3,
+    group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
-    group.add_argument('--num_samples', type=int, default=None,
+    group.add_argument('--num_samples', type=int, default=100,
                        help='Number of adjacent edge samples')
     group.add_argument('--in_dim', type=int, default=100,
                        help='Input feature dimension')
-    group.add_argument('--hid_dim', type=int, default=256,
+    group.add_argument('--hid_dim', type=int, default=128,
                        help='Hidden dimension')
-    group.add_argument('--att_dim', type=int, default=512,
+    group.add_argument('--att_dim', type=int, default=128,
                        help='Attention dimension (if used)')
-    group.add_argument('--num_generators', type=int, default=128,
+    group.add_argument('--num_generators', type=int, default=64,
                        help='Number of generators in FM')
     group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gin'],
                        help='GNN layer type')
-    group.add_argument('--act_str', type=str, default='gelu',
+    group.add_argument('--act_str', type=str, default='relu',
                        help='Activation function')
     group.add_argument('--drop', type=float, default=0.1,
                        help='Dropout rate')

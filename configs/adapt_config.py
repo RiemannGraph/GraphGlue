@@ -47,6 +47,10 @@ class AdaptionConfig(ModelConfig):
     resume_checkpoint: bool = False
     patience: int = 20
 
+    # Path
+    checkpoint_dir: str = None
+    log_path: str = None
+
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
@@ -171,11 +175,11 @@ def parse_adaption_config() -> AdaptionConfig:
         patience=args.patience
     )
 
+    if args.config_save_path:
+        save_config_to_yaml(config, args.config_save_path)
+
     # Paths
     config.log_path = f"logs/{config.task_type}/{config.k_shot}-shot/{config.data_name}.log"
     config.checkpoint_dir = f"checkpoints/{config.task_type}/{config.k_shot}-shot/{config.data_name}/"
-
-    if args.config_save_path:
-        save_config_to_yaml(config, args.config_save_path)
 
     return config
