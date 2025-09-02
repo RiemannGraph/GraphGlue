@@ -5,9 +5,9 @@ from torch_geometric.loader import DataLoader, NeighborLoader
 from utils.logger import create_logger
 from utils.checkpoints import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints
 import os
-from typing import List
 from torch_geometric.transforms import RootedEgoNets, Compose
 from data.data_transform import RenameFromRootedEgoNets
+from utils.tools import format_time
 import time
 import gc
 import warnings
@@ -26,7 +26,8 @@ class Pretrainer:
         self.model = RPGraphFM(configs).to(self.device)
         self.logger = create_logger(configs.log_path) if logger is None else logger
         self.start_epoch = 0
-
+        self.start_time = None
+        self.epoch_times = []
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
 
     def train(self):
@@ -107,106 +108,11 @@ class Pretrainer:
                 self.logger.info(f'Saved final model: {final_model_path}')
                 self.final_model_path = final_model_path
 
-    def _train_epoch(self, optimizer, epoch):
-        self.model.train()
-        total_loss = 0.0
-        total_batches = 0
-
-        all_graph_prototypes = []
-        all_graph_tan_prototypes = []
-
-        # Handling node-level graph datasets
-        num_node_level_datasets = len(self.pretrain_single_graph_data)
-        if num_node_level_datasets > 0:
-            for data_idx, data_name in enumerate(self.pretrain_single_graph_data):
-                self.logger.info(f'Processing node loader {data_idx + 1}/{num_node_level_datasets}')
-
-                graph_z_list = []
-                graph_z_tan_list = []
-
-                node_loader = self._create_node_loader(data_name)
-                for batch_idx, data in enumerate(node_loader):
-                    optimizer.zero_grad()
-                    data = data.to(self.device)
-                    z, z_tan = self.model(data, data.batch_graph_nums)
-                    intra_loss = self.model.loss(z, z_tan, data.origin_edge_index, node_loader.batch_size)
-                    intra_loss.backward()
-                    # if self.configs.max_grad_norm > 0:
-                    #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
-                    optimizer.step()
-
-                    graph_z_list.append(z[:node_loader.batch_size].detach().cpu())
-                    graph_z_tan_list.append(z_tan[:node_loader.batch_size].detach().cpu())
-
-                    total_loss += intra_loss.item()
-                    total_batches += 1
-
-                    if batch_idx % self.configs.log_interval == 0:
-                        self.logger.info(
-                            f'Epoch {epoch} | Node Loader {data_idx} | '
-                            f'Batch {batch_idx} | Loss: {intra_loss.item():.6f}'
-                        )
-
-                # compute current graph prototypes
-                if graph_z_list:
-                    g_rep = torch.cat(graph_z_list, dim=0).mean(dim=0, keepdim=True)  # [1, dim]
-                    g_rep_tan = torch.cat(graph_z_tan_list, dim=0).mean(dim=0, keepdim=True)
-                    all_graph_prototypes.append(g_rep)
-                    all_graph_tan_prototypes.append(g_rep_tan)
-
-                del node_loader, graph_z_list, graph_z_tan_list
-                gc.collect()
-
-        # Handling graph-level graph datasets
-        num_graph_level_datasets = len(self.pretrain_multi_graph_data)
-        if num_graph_level_datasets > 0:
-            for data_idx, data_name in enumerate(self.pretrain_multi_graph_data):
-                self.logger.info(f'Processing graph loader {data_idx + 1}/{num_graph_level_datasets}')
-                graph_loader = self._create_graph_loader(data_name)
-                for batch_idx, data in enumerate(graph_loader):
-                    optimizer.zero_grad()
-                    data = data.to(self.device)
-                    z, z_tan = self.model(data, data.batch_size)
-                    edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                    intra_loss = self.model.loss(z, z_tan, edge_index)
-                    intra_loss.backward()
-                    # if self.configs.max_grad_norm > 0:
-                    #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
-                    optimizer.step()
-
-                    all_graph_prototypes.append(z.detach().cpu())
-                    all_graph_tan_prototypes.append(z_tan.detach().cpu())
-
-                    total_loss += intra_loss.item()
-                    total_batches += 1
-
-                del graph_loader
-                gc.collect()
-
-        # Handling cross datasets
-        if len(all_graph_prototypes) > 0:
-            optimizer.zero_grad()
-            all_graph_embeds = torch.cat(all_graph_prototypes, dim=0).to(self.device)  # [N_total, dim]
-            all_graph_tans = torch.cat(all_graph_tan_prototypes, dim=0).to(self.device)
-            edge_index = self.model.knn_graph(all_graph_embeds, self.configs.knn)
-            inter_loss = self.model.loss(all_graph_embeds, all_graph_tans, edge_index)
-            inter_loss.backward()
-            # if self.configs.max_grad_norm > 0:
-            #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.configs.max_grad_norm)
-            optimizer.step()
-
-            total_loss += inter_loss.item()
-            total_batches += 1
-            self.logger.info(f'Epoch {epoch} | Inter Loss: {inter_loss.item():.6f}')
-            del all_graph_embeds, all_graph_tans
-        else:
-            self.logger.warning("Not enough graph prototypes for inter-loss.")
-        return total_loss / total_batches
-
     @torch.no_grad()
     def register_from_loaders(self):
         if self.final_model_path:
-            load_checkpoint(self.final_model_path, self.model, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+            load_checkpoint(self.final_model_path, self.model,
+                            map_location='cuda' if torch.cuda.is_available() else 'cpu')
         self.model.eval()
         proto_z_list = []
         proto_z_tan_list = []
@@ -256,6 +162,220 @@ class Pretrainer:
         self.model.register_prototypes(final_proto_z, final_proto_z_tan)
 
         return self.model
+
+    def _train_epoch(self, optimizer, epoch):
+        if self.start_time is None:
+            self.start_time = time.time()
+        start_epoch_time = time.time()
+
+        self.model.train()
+        total_loss = 0.0
+        total_batches = 0
+
+        all_graph_prototypes = []
+        all_graph_tan_prototypes = []
+
+        # Node-level datasets
+        loss_stats = self._train_node_level(
+            optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes
+        )
+        total_loss += loss_stats['loss']
+        total_batches += loss_stats['batches']
+
+        # Graph-level datasets
+        loss_stats = self._train_graph_level(
+            optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes
+        )
+        total_loss += loss_stats['loss']
+        total_batches += loss_stats['batches']
+
+        # Cross-datasets
+        inter_loss = self._compute_inter_loss(optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes)
+        if inter_loss is not None:
+            total_loss += inter_loss
+            total_batches += 1
+
+        # Log epoch summary and estimate remaining time
+        self._log_epoch_summary(epoch, start_epoch_time)
+        self._update_epoch_time(epoch, start_epoch_time)
+
+        return total_loss / total_batches
+
+    def _train_node_level(self, optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes):
+        total_loss = 0.0
+        total_batches = 0
+        num_datasets = len(self.pretrain_single_graph_data)
+
+        if num_datasets == 0:
+            return {'loss': 0.0, 'batches': 0}
+
+        for data_idx, data_name in enumerate(self.pretrain_single_graph_data):
+            self.logger.info(f'Processing node loader {data_idx + 1}/{num_datasets}')
+            graph_z_list = []
+            graph_z_tan_list = []
+
+            node_loader = self._create_node_loader(data_name)
+            dataset_len = len(node_loader)
+            start_loader_time = time.time()
+            last_log_time = start_loader_time
+
+            for batch_idx, data in enumerate(node_loader):
+                optimizer.zero_grad()
+                data = data.to(self.device)
+                z, z_tan = self.model(data, data.batch_graph_nums)
+                intra_loss = self.model.loss(z, z_tan, data.origin_edge_index, node_loader.batch_size)
+                intra_loss.backward()
+                optimizer.step()
+
+                graph_z_list.append(z[:node_loader.batch_size].detach().cpu())
+                graph_z_tan_list.append(z_tan[:node_loader.batch_size].detach().cpu())
+
+                total_loss += intra_loss.item()
+                total_batches += 1
+
+                if batch_idx % self.configs.log_interval == 0:
+                    self._log_progress(
+                        epoch=epoch,
+                        loader_type="Node",
+                        loader_idx=data_idx,
+                        batch_idx=batch_idx,
+                        dataset_len=dataset_len,
+                        loss=intra_loss.item(),
+                        start_loader_time=start_loader_time,
+                        batches_done=batch_idx + 1
+                    )
+
+            # Save prototype for this dataset
+            if graph_z_list:
+                g_rep = torch.cat(graph_z_list, dim=0).mean(dim=0, keepdim=True)
+                g_rep_tan = torch.cat(graph_z_tan_list, dim=0).mean(dim=0, keepdim=True)
+                all_graph_prototypes.append(g_rep)
+                all_graph_tan_prototypes.append(g_rep_tan)
+
+            del node_loader, graph_z_list, graph_z_tan_list
+            gc.collect()
+
+        return {'loss': total_loss, 'batches': total_batches}
+
+    def _train_graph_level(self, optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes):
+        total_loss = 0.0
+        total_batches = 0
+        num_datasets = len(self.pretrain_multi_graph_data)
+
+        if num_datasets == 0:
+            return {'loss': 0.0, 'batches': 0}
+
+        for data_idx, data_name in enumerate(self.pretrain_multi_graph_data):
+            self.logger.info(f'Processing graph loader {data_idx + 1}/{num_datasets}')
+
+            graph_loader = self._create_graph_loader(data_name)
+            dataset_len = len(graph_loader)
+            start_loader_time = time.time()
+            last_log_time = start_loader_time
+
+            for batch_idx, data in enumerate(graph_loader):
+                optimizer.zero_grad()
+                data = data.to(self.device)
+                z, z_tan = self.model(data, data.batch_size)
+                edge_index, _ = self.model.knn_graph(z, self.configs.knn)
+                intra_loss = self.model.loss(z, z_tan, edge_index)
+                intra_loss.backward()
+                optimizer.step()
+
+                all_graph_prototypes.append(z.detach().cpu())
+                all_graph_tan_prototypes.append(z_tan.detach().cpu())
+
+                total_loss += intra_loss.item()
+                total_batches += 1
+
+                if batch_idx % self.configs.log_interval == 0:
+                    self._log_progress(
+                        epoch=epoch,
+                        loader_type="Graph",
+                        loader_idx=data_idx,
+                        batch_idx=batch_idx,
+                        dataset_len=dataset_len,
+                        loss=intra_loss.item(),
+                        start_loader_time=start_loader_time,
+                        batches_done=batch_idx + 1
+                    )
+
+            del graph_loader
+            gc.collect()
+
+        return {'loss': total_loss, 'batches': total_batches}
+
+    def _compute_inter_loss(self, optimizer, epoch, all_graph_prototypes, all_graph_tan_prototypes):
+        if len(all_graph_prototypes) == 0:
+            self.logger.warning("Not enough graph prototypes for inter-loss.")
+            return None
+
+        optimizer.zero_grad()
+        all_graph_embeds = torch.cat(all_graph_prototypes, dim=0).to(self.device)
+        all_graph_tans = torch.cat(all_graph_tan_prototypes, dim=0).to(self.device)
+        edge_index = self.model.knn_graph(all_graph_embeds, self.configs.knn)
+        inter_loss = self.model.loss(all_graph_embeds, all_graph_tans, edge_index)
+        inter_loss.backward()
+        optimizer.step()
+
+        self.logger.info(f'Epoch {epoch} | Inter Loss: {inter_loss.item():.6f}')
+
+        del all_graph_embeds, all_graph_tans
+        return inter_loss.item()
+
+    def _log_progress(self, epoch, loader_type, loader_idx, batch_idx, dataset_len, loss, start_loader_time,
+                      batches_done):
+        current_time = time.time()
+
+        batches_remaining = dataset_len - batches_done
+        recent_avg_batch_time = (current_time - start_loader_time) / batches_done
+        loader_remaining_time = recent_avg_batch_time * batches_remaining
+
+        if len(self.epoch_times) == 0:
+            elapsed_total = current_time - self.start_time
+            avg_epoch_time = elapsed_total / (epoch + 1)
+        else:
+            avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
+
+        remaining_epochs = max(0, self.configs.pretrain_epochs - (epoch + 1))
+
+        if epoch == 0:
+            total_remaining_time = None
+        else:
+            total_remaining_time = avg_epoch_time * remaining_epochs
+
+        self.logger.info(
+            f'Epoch {epoch} | {loader_type} Loader {loader_idx} | '
+            f'Batch {batch_idx}/{dataset_len} | '
+            f'Loss: {loss:.6f} | '
+            f'Loader ETA: {format_time(loader_remaining_time)} | '
+            f'Total ETA: {format_time(total_remaining_time)}'
+        )
+
+    def _log_epoch_summary(self, epoch, start_epoch_time):
+        if len(self.epoch_times) == 0:
+            avg_epoch_time = time.time() - self.start_time
+        else:
+            avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
+
+        remaining_epochs = max(0, self.configs.pretrain_epochs - (epoch + 1))
+        if epoch == 0:
+            total_remaining_time = None
+        else:
+            total_remaining_time = avg_epoch_time * remaining_epochs
+
+        epoch_duration = time.time() - start_epoch_time
+
+        self.logger.info(
+            f'Epoch {epoch} completed in {format_time(epoch_duration)}. '
+            f'Estimated remaining training time: {format_time(total_remaining_time)} '
+            f'({remaining_epochs} epochs left)'
+        )
+
+    def _update_epoch_time(self, epoch, start_epoch_time):
+        expected_len = epoch
+        if len(self.epoch_times) == expected_len:
+            self.epoch_times.append(time.time() - start_epoch_time)
 
     def _create_node_loader(self, data_name):
         data = load_pretrain_single_graph_data(self.configs, data_name)
