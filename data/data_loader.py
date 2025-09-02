@@ -22,7 +22,7 @@ def load_pretrain_single_graph_data(configs, data_name):
         dataset = AmazonProducts(f"{root}/{data_name}")
         data = dataset[0]
     elif data_name == 'Reddit':
-        dataset = Reddit(root)
+        dataset = Reddit(f"{root}/{data_name}")
         data = dataset[0]
     elif data_name == 'FB15k_237':
         transform = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,

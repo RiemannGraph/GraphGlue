@@ -79,6 +79,7 @@ class Node2VecEmbedding(BaseTransform):
 
         model = Node2Vec(
             edge_index,
+            num_nodes=data.num_nodes,
             embedding_dim=self.embed_dim,
             walk_length=self.walk_length,
             context_size=self.context_size,
