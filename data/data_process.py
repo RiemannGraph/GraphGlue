@@ -47,7 +47,7 @@ def search_adjacent_edges(edge_index, num_samples=None):
     ], dim=1)
     paths = paths[paths[:, 0] != paths[:, 2]]
 
-    if num_samples is not None:
+    if num_samples is not None and num_samples < paths.shape[0]:
         node_degree = degree(edge_index)
         j_deg = node_degree[paths[:, 1]]
         i_deg = node_degree[paths[:, 0]]

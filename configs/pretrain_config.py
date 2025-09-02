@@ -33,6 +33,7 @@ class PretrainConfig(ModelConfig):
     max_grad_norm: float = 1.0
     log_interval: int = 10
     save_interval: int = 10
+    inter_loss_interval: int = 1
     resume_checkpoint: bool = False
 
     # Loss & Graph
@@ -71,15 +72,15 @@ def get_pretrain_parser():
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size for data loading')
     parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of workers for data loading')
 
     # Training
-    parser.add_argument('--pretrain_epochs', type=int, default=100,
+    parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')
-    parser.add_argument('--lr_pretrain', type=float, default=3e-4,
+    parser.add_argument('--lr_pretrain', type=float, default=3e-3,
                         help='Learning rate for pretraining')
     parser.add_argument('--pretrain_weight_decay', type=float, default=0,
                         help='Weight decay for Adam optimizer')
@@ -87,8 +88,10 @@ def get_pretrain_parser():
                         help='Max gradient norm for clipping')
     parser.add_argument('--log_interval', type=int, default=10,
                         help='Log every N batches')
-    parser.add_argument('--save_interval', type=int, default=10,
+    parser.add_argument('--save_interval', type=int, default=1,
                         help='Save checkpoint every N epochs')
+    parser.add_argument('--inter_loss_interval', type=int, default=1,
+                        help="Compute inter_loss every N epochs")
     parser.add_argument('--resume_checkpoint', action='store_true',
                         help='Whether to resume from latest checkpoint')
 
