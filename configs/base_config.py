@@ -51,7 +51,7 @@ def add_model_config(parser: ArgumentParser):
                        help='Attention dimension (if used)')
     group.add_argument('--num_generators', type=int, default=128,
                        help='Number of generators in FM')
-    group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gat'],
+    group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gin'],
                        help='GNN layer type')
     group.add_argument('--act_str', type=str, default='gelu',
                        help='Activation function')
