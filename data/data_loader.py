@@ -18,8 +18,8 @@ def load_pretrain_single_graph_data(configs, data_name):
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected()]))
         data = dataset[0]
-    elif data_name == 'AmazonProducts':
-        dataset = AmazonProducts(f"{root}/{data_name}")
+    elif data_name == 'Computers':
+        dataset = Amazon(root, data_name)
         data = dataset[0]
     elif data_name == 'Reddit':
         dataset = Reddit(f"{root}/{data_name}")
@@ -59,10 +59,14 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
                                   num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
     if data_name in ["Cora", "CiteSeers", "PubMed"]:
         dataset = Planetoid(root, data_name, transform=transform)
-    elif data_name == "Computers":
+    elif data_name in ["Computers", "Photo"]:
         dataset = Amazon(root, data_name, transform=transform)
+    elif data_name == 'Reddit':
+        dataset = Reddit(f"{root}/{data_name}", transform=transform)
     elif data_name == "FacebookPagePage":
         dataset = FacebookPagePage(f"{root}/{data_name}", transform=transform)
+    elif data_name == 'PPI':
+        dataset = AttributedGraphDataset(root, name=data_name.lower(), transform=transform)
     else:
         raise ValueError('Invalid data_name')
     data = dataset[0]
@@ -77,7 +81,7 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
     root = configs.root
     if data_name in ["PROTEINS", "MUTAG", "ENZYMES"]:
         dataset = TUDataset(root, data_name)
-    elif data_name in ["HIV"]:
+    elif data_name in ["PCBA", "HIV"]:
         dataset=  MoleculeNet(root, data_name)
     else:
         raise ValueError('Invalid data_name')
@@ -88,14 +92,21 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
 
 def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
     root = configs.root
-    transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
-    transform_x = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
+    if data_name == "WordNet18RR":
+        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+        transform_x = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
-    if data_name == "WordNet18RR":
         dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_split, transform_x]))
         data = dataset[0]
+    elif data_name == 'FB15k_237':
+        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+        transform_x = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
+                                      configs.nv_walk_length, configs.nv_context_size,
+                                      configs.nv_lr, configs.nv_walks_per_node,
+                                      configs.nv_p, configs.nv_q, configs.nv_num_epochs)
+        dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_split, transform_x]))
     else:
         raise ValueError('Invalid data_name')
     if data.edge_weight is None:
