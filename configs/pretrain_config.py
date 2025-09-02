@@ -144,10 +144,11 @@ def parse_pretrain_config() -> PretrainConfig:
         knn=args.knn
     )
 
-    if args.config_save_path:
-        save_config_to_yaml(config, args.config_save_path)
-
     # Path
     config.log_path = "logs/pretrain/pretrain.log"
     config.checkpoint_dir = "checkpoints/pretrain/"
+
+    if args.config_save_path:
+        save_config_to_yaml(config, args.config_save_path)
+
     return config
