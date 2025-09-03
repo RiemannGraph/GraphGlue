@@ -43,6 +43,8 @@ def load_pretrain_multi_graph_data(configs, data_name):
     root = configs.root
     if data_name in ["PCBA", "HIV"]:
         dataset = MoleculeNet(root, name=data_name, transform=UnifyFeatureDims(configs.in_dim))
+    elif data_name in ["PROTEINS", "MUTAG", "ENZYMES"]:
+        dataset = TUDataset(root, data_name, transform=UnifyFeatureDims(configs.in_dim))
     else:
         raise ValueError('Invalid data_name')
     dataset = GraphDataset(dataset)

@@ -232,13 +232,24 @@ class Pretrainer:
             return {'loss': 0.0, 'batches': 0}
 
         start_idx = 0
-        if resume_from and resume_from['step_type'] == 'node':
-            try:
-                start_idx = self.pretrain_single_graph_data.index(resume_from['last_data_name']) + 1
-            except ValueError:
-                start_idx = 0
-            if start_idx >= num_datasets:
+
+        if resume_from:
+            if resume_from['step_type'] == 'node':
+                try:
+                    start_idx = self.pretrain_single_graph_data.index(resume_from['last_data_name']) + 1
+                except ValueError:
+                    start_idx = 0
+                if start_idx >= num_datasets:
+                    return {'loss': 0.0, 'batches': 0}
+
+            elif resume_from['step_type'] == 'graph':
+                self.logger.info("Resuming from 'graph' stage. Skipping all node-level training.")
                 return {'loss': 0.0, 'batches': 0}
+
+        if start_idx >= num_datasets:
+            return {'loss': 0.0, 'batches': 0}
+
+        if start_idx > 0:
             self.logger.info(
                 f"Resuming node-level from dataset {start_idx}: {self.pretrain_single_graph_data[start_idx]}")
 
@@ -297,13 +308,24 @@ class Pretrainer:
             return {'loss': 0.0, 'batches': 0}
 
         start_idx = 0
-        if resume_from and resume_from['step_type'] == 'graph':
-            try:
-                start_idx = self.pretrain_multi_graph_data.index(resume_from['last_data_name']) + 1
-            except ValueError:
+
+        if resume_from:
+            if resume_from['step_type'] == 'graph':
+                try:
+                    start_idx = self.pretrain_multi_graph_data.index(resume_from['last_data_name']) + 1
+                except ValueError:
+                    start_idx = 0
+                if start_idx >= num_datasets:
+                    return {'loss': 0.0, 'batches': 0}
+
+            elif resume_from['step_type'] == 'node':
+                self.logger.info("Resuming from 'node' stage. Starting graph-level from first dataset.")
                 start_idx = 0
-            if start_idx >= num_datasets:
-                return {'loss': 0.0, 'batches': 0}
+
+        if start_idx >= num_datasets:
+            return {'loss': 0.0, 'batches': 0}
+
+        if start_idx > 0:
             self.logger.info(
                 f"Resuming graph-level from dataset {start_idx}: {self.pretrain_multi_graph_data[start_idx]}")
 
@@ -358,18 +380,14 @@ class Pretrainer:
         all_z = []
         all_z_tan = []
         for data_name in self.pretrain_single_graph_data:
-            node_loader = self._create_node_loader(data_name)
-            z_list, z_tan_list = [], []
+            data = load_pretrain_single_graph_data(self.configs, data_name)
+            node_loader = DataLoader([data], batch_size=1, shuffle=False,
+                                  num_workers=self.configs.num_workers, persistent_workers=False)
             for data in node_loader:
                 data = data.to(self.device)
-                z, z_tan = self.model(data, data.batch_graph_nums)
-                g_z = z[:node_loader.batch_size].mean(dim=0, keepdim=True)  # [1, d]
-                g_z_tan = z_tan[:node_loader.batch_size].mean(dim=0, keepdim=True)
-                z_list.append(g_z)
-                z_tan_list.append(g_z_tan)
-            if z_list:
-                all_z.append(torch.cat(z_list, dim=0))  # [num_graphs, d]
-                all_z_tan.append(torch.cat(z_tan_list, dim=0))
+                z, z_tan = self.model(data, data.batch_size)
+                all_z.append(z)
+                all_z_tan.append(z_tan)
             del node_loader
             torch.cuda.empty_cache()
 
@@ -461,7 +479,7 @@ class Pretrainer:
             self.epoch_times.append(time.time() - start_epoch_time)
 
     def _create_node_loader(self, data_name):
-        data = load_pretrain_single_graph_data(self.configs, data_name)
+        dataset, data = load_pretrain_single_graph_data(self.configs, data_name)
         node_loader = NeighborLoader(data, batch_size=self.configs.batch_size,
                                      num_neighbors=self.configs.num_neighbors,
                                      shuffle=False, num_workers=self.configs.num_workers,

@@ -202,7 +202,8 @@ class RPGraphFM(nn.Module):
 
         :return: edge_index, edge_weight [Torch.Tensor, torch.Tensor]
         """
-        assert top_k < h.shape[0], f"top_k={top_k} must be smaller than f{h.shape[0]}"
+        if top_k > h.shape[0]:
+            top_k = h.shape[0]
         similarity = h @ h.t()
         _, indices = similarity.topk(k=top_k, dim=-1)
         edge_index = indices.t()
