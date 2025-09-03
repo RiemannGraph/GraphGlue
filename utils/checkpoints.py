@@ -170,7 +170,7 @@ def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     for f in checkpoint_dir.iterdir():
         if f.suffix == '.pth' and f.name != 'model_best.pth' and 'pretrain_epoch' in f.name:
             try:
-                epoch = int(f.stem.split('_')[-1])  # 支持 pretrain_epoch_10.pth
+                epoch = int(f.stem.split('_')[-1])  # e.g., pretrain_epoch_10.pth
                 files.append((epoch, f))
             except (ValueError, IndexError):
                 continue

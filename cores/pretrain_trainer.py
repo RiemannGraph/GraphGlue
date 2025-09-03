@@ -479,7 +479,7 @@ class Pretrainer:
     def _save_temp_checkpoint(self, data_name, optimizer, scheduler, epoch, step_type="node", data_idx=0):
         temp_model_path = os.path.join(
             self.tmp_checkpoint_dir,
-            f'tmp_{step_type}_{data_name}_epoch_{epoch}.pth'
+            f'temp_pretrain_epoch_{epoch}.pth'
         )
         temp_config = self.configs.__dict__.copy()
         temp_config['resume_from'] = {

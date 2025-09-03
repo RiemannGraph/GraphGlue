@@ -154,6 +154,7 @@ def parse_pretrain_config() -> PretrainConfig:
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         resume_checkpoint=args.resume_checkpoint,
+        resume_temp_checkpoint=args.resume_temp_checkpoint,
         knn=args.knn
     )
 

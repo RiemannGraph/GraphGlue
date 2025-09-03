@@ -35,10 +35,10 @@ def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "PPI", "FB15k_237"],
+                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
                         help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
-                        default=["HIV"],
+                        default=["PROTEINS", "HIV"],
                         help='graph-level pretraining datasets')
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
