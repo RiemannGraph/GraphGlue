@@ -7,7 +7,7 @@ from torch_geometric.datasets import (
 )
 from data.data_custom import FB15k_237
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_transform import UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
+from data.data_transform import FlattenLabels, UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
 from data.data_process import graph_few_shot_splits, link_k_shot_split
 from torch_geometric.data import Dataset
 from torch_geometric.utils import to_undirected
@@ -17,25 +17,21 @@ def load_pretrain_single_graph_data(configs, data_name):
     root = configs.root
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected()]))
-        data = dataset[0]
     elif data_name == 'Computers':
         dataset = Amazon(root, data_name)
-        data = dataset[0]
     elif data_name == 'Reddit':
         dataset = Reddit(f"{root}/{data_name}")
-        data = dataset[0]
     elif data_name == 'FB15k_237':
         transform = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
         dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=transform)
-        data = dataset[0]
     elif data_name == 'PPI':
         dataset = AttributedGraphDataset(root, name=data_name.lower())
-        data = dataset[0]
     else:
         raise ValueError('Invalid data_name')
+    data = dataset[0]
     data = UnifyFeatureDims(configs.in_dim)(data)
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
@@ -57,7 +53,9 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
     root = configs.root
     transform = T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
                                   num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
-    if data_name in ["Cora", "CiteSeers", "PubMed"]:
+    if data_name == "ogbn-arxiv":
+        dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), FlattenLabels(), transform]))
+    elif data_name in ["Cora", "CiteSeers", "PubMed"]:
         dataset = Planetoid(root, data_name, transform=transform)
     elif data_name in ["Computers", "Photo"]:
         dataset = Amazon(root, data_name, transform=transform)

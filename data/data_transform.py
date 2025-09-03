@@ -5,6 +5,15 @@ import torch
 from data.data_process import unify_feature_dimension, link_k_shot_split
 
 
+class FlattenLabels(BaseTransform):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, data):
+        data.y = data.y.reshape(-1)
+        return data
+
+
 class UnifyFeatureDims(BaseTransform):
     def __init__(self, uni_dim: int):
         super().__init__()
