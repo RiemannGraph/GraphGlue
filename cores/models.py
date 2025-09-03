@@ -132,18 +132,21 @@ class RPGraphFM(nn.Module):
         :return: loss for each graph batch or all datasets
         """
         triple = search_adjacent_edges(edge_index, self.num_samples)
-        vi, vj, vk = triple[0], triple[1], triple[2]
-        z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
-        pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
-        pt_matrix_jk = self.parallel_translation(z_tan_j, z_tan_k)
-        pt_matrix_ik = self.parallel_translation(z_tan_i, z_tan_k)
-        pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
+        if len(triple):
+            vi, vj, vk = triple[0], triple[1], triple[2]
+            z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
+            pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
+            pt_matrix_jk = self.parallel_translation(z_tan_j, z_tan_k)
+            pt_matrix_ik = self.parallel_translation(z_tan_i, z_tan_k)
+            pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
 
-        log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
-        log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
-        log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
+            log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
+            log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
+            log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
 
-        geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
+            geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
+        else:
+            geo_loss = 0
 
         if batch_size is not None:
             z = z[:batch_size]
