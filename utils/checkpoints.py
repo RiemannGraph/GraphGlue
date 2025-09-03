@@ -93,8 +93,9 @@ def load_checkpoint(
     model: torch.nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
-    map_location: Optional[str] = None
-) -> int:
+    map_location: Optional[str] = None,
+    return_config: bool = False,
+) -> int | tuple[int, dict[str, Any]]:
     """
 
     Args:
@@ -103,6 +104,7 @@ def load_checkpoint(
         optimizer:
         scheduler:
         map_location: 'cpu' or 'cuda'
+        return_config:
 
     Returns:
         int: resume epoch (start_epoch)
@@ -141,7 +143,10 @@ def load_checkpoint(
                 logger.warning(f"Failed to load scheduler state: {e}")
 
         logger.info(f"Successfully resumed from epoch {ckpt.epoch}")
-        return ckpt.epoch
+        if return_config:
+            return ckpt.epoch, ckpt.config
+        else:
+            return ckpt.epoch
 
     except Exception as e:
         logger.error(f"Failed to load checkpoint from {filepath}: {str(e)}")

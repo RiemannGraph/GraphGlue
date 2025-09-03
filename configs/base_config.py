@@ -38,7 +38,7 @@ def add_model_config(parser: ArgumentParser):
                         default=["ogbn-arxiv", "AmazonProducts", "Reddit", "PPI", "FB15k_237"],
                         help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
-                        default=["PCBA"],
+                        default=["HIV"],
                         help='graph-level pretraining datasets')
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')

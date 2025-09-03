@@ -3,14 +3,16 @@ from cores.models import RPGraphFM
 from data.data_loader import load_pretrain_single_graph_data, load_pretrain_multi_graph_data
 from torch_geometric.loader import DataLoader, NeighborLoader
 from utils.logger import create_logger
-from utils.checkpoints import save_checkpoint, load_checkpoint, get_latest_checkpoint, cleanup_old_checkpoints
+from utils.checkpoints import (
+    save_checkpoint,
+    load_checkpoint,
+    get_latest_checkpoint,
+    cleanup_old_checkpoints)
 import os
-from typing import List
 from torch_geometric.transforms import RootedEgoNets, Compose
 from data.data_transform import RenameFromRootedEgoNets
 from utils.tools import format_time
 import time
-from datetime import timedelta
 import gc
 import warnings
 
@@ -20,7 +22,7 @@ warnings.filterwarnings("ignore")
 class Pretrainer:
     def __init__(self, configs, logger=None):
         self.final_model_path = None
-        assert len(configs.num_neighbors) >= configs.k_hops, "number of neighbor hops are not match!"
+        assert len(configs.num_neighbors) == configs.k_hops, "number of neighbor hops are not match!"
         self.configs = configs
         self.pretrain_single_graph_data = configs.pretrain_single_graph_data
         self.pretrain_multi_graph_data = configs.pretrain_multi_graph_data
@@ -30,7 +32,11 @@ class Pretrainer:
         self.start_epoch = 0
         self.start_time = None
         self.epoch_times = []
+
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
+
+        self.tmp_checkpoint_dir = os.path.join(self.configs.checkpoint_dir, 'tmp')
+        os.makedirs(self.tmp_checkpoint_dir, exist_ok=True)
 
     def train(self):
         optimizer = torch.optim.Adam(
@@ -46,26 +52,43 @@ class Pretrainer:
         )
 
         # Resume checkpoint if you want
+        resume_from = None
+        if self.configs.resume_checkpoint and self.configs.resume_temp_checkpoint:
+            raise ValueError("Conflicting resume settings...")
+
         if self.configs.resume_checkpoint:
             latest_check_path = get_latest_checkpoint(self.configs.checkpoint_dir)
             if latest_check_path:
-                self.start_epoch = load_checkpoint(
-                    filepath=latest_check_path,
-                    model=self.model,
-                    optimizer=optimizer,
-                    scheduler=scheduler
-                )
-                self.logger.info(f"Resumed training from epoch {self.start_epoch}")
+                self.start_epoch = load_checkpoint(latest_check_path, self.model, optimizer, scheduler)
+                self.logger.info(f"Resumed from main checkpoint at epoch {self.start_epoch}")
             else:
                 self.start_epoch = 0
-                self.logger.info("No checkpoint found. Start from scratch.")
+
+        elif self.configs.resume_temp_checkpoint:
+            latest_temp_path = get_latest_checkpoint(self.tmp_checkpoint_dir)
+            if latest_temp_path:
+                self.start_epoch, temp_config = load_checkpoint(
+                    filepath=latest_temp_path,
+                    model=self.model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    return_config=True
+                )
+                resume_from = temp_config.get('resume_from')
+                self.logger.info(f"Resumed from temp checkpoint at epoch {self.start_epoch}, step: {resume_from}")
+            else:
+                self.start_epoch = 0
         else:
             self.start_epoch = 0
 
         for epoch in range(self.start_epoch, self.configs.pretrain_epochs):
             epoch_start_time = time.time()
 
-            train_loss = self._train_epoch(optimizer, epoch)
+            train_loss = self._train_epoch(optimizer, scheduler, epoch, resume_from=resume_from)
+
+            if epoch == self.start_epoch:
+                resume_from = None
+                self.logger.info("Resume flag cleared after first epoch.")
 
             scheduler.step()
 
@@ -109,6 +132,8 @@ class Pretrainer:
                 )
                 self.logger.info(f'Saved final model: {final_model_path}')
                 self.final_model_path = final_model_path
+
+            cleanup_old_checkpoints(self.tmp_checkpoint_dir, keep_last=3)
 
     @torch.no_grad()
     def register_from_loaders(self):
@@ -165,7 +190,7 @@ class Pretrainer:
 
         return self.model
 
-    def _train_epoch(self, optimizer, epoch):
+    def _train_epoch(self, optimizer, scheduler, epoch, resume_from=None):
         if self.start_time is None:
             self.start_time = time.time()
         start_epoch_time = time.time()
@@ -175,11 +200,11 @@ class Pretrainer:
         total_batches = 0
 
         # Phase 1: Intra Training
-        loss_stats = self._train_node_level(optimizer, epoch)
+        loss_stats = self._train_node_level(optimizer, scheduler, epoch, resume_from)
         total_loss += loss_stats['loss']
         total_batches += loss_stats['batches']
 
-        loss_stats = self._train_graph_level(optimizer, epoch)
+        loss_stats = self._train_graph_level(optimizer, scheduler, epoch, resume_from)
         total_loss += loss_stats['loss']
         total_batches += loss_stats['batches']
 
@@ -198,7 +223,7 @@ class Pretrainer:
 
         return total_loss / total_batches
 
-    def _train_node_level(self, optimizer, epoch):
+    def _train_node_level(self, optimizer, scheduler, epoch, resume_from=None):
         total_loss = 0.0
         total_batches = 0
         num_datasets = len(self.pretrain_single_graph_data)
@@ -206,7 +231,21 @@ class Pretrainer:
         if num_datasets == 0:
             return {'loss': 0.0, 'batches': 0}
 
+        start_idx = 0
+        if resume_from and resume_from['step_type'] == 'node':
+            try:
+                start_idx = self.pretrain_single_graph_data.index(resume_from['last_data_name']) + 1
+            except ValueError:
+                start_idx = 0
+            if start_idx >= num_datasets:
+                return {'loss': 0.0, 'batches': 0}
+            self.logger.info(
+                f"Resuming node-level from dataset {start_idx}: {self.pretrain_single_graph_data[start_idx]}")
+
         for data_idx, data_name in enumerate(self.pretrain_single_graph_data):
+            if data_idx < start_idx:
+                continue
+
             self.logger.info(f'Processing node loader {data_idx + 1}/{num_datasets}')
             node_loader = self._create_node_loader(data_name)
             dataset_len = len(node_loader)
@@ -235,12 +274,21 @@ class Pretrainer:
                         batches_done=batch_idx + 1
                     )
 
+            self._save_temp_checkpoint(
+                data_name=data_name,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch,
+                step_type="node",
+                data_idx=data_idx
+            )
+
             del node_loader
             torch.cuda.empty_cache()
 
         return {'loss': total_loss, 'batches': total_batches}
 
-    def _train_graph_level(self, optimizer, epoch):
+    def _train_graph_level(self, optimizer, scheduler, epoch, resume_from=None):
         total_loss = 0.0
         total_batches = 0
         num_datasets = len(self.pretrain_multi_graph_data)
@@ -248,7 +296,21 @@ class Pretrainer:
         if num_datasets == 0:
             return {'loss': 0.0, 'batches': 0}
 
+        start_idx = 0
+        if resume_from and resume_from['step_type'] == 'graph':
+            try:
+                start_idx = self.pretrain_multi_graph_data.index(resume_from['last_data_name']) + 1
+            except ValueError:
+                start_idx = 0
+            if start_idx >= num_datasets:
+                return {'loss': 0.0, 'batches': 0}
+            self.logger.info(
+                f"Resuming graph-level from dataset {start_idx}: {self.pretrain_multi_graph_data[start_idx]}")
+
         for data_idx, data_name in enumerate(self.pretrain_multi_graph_data):
+            if data_idx < start_idx:
+                continue
+
             self.logger.info(f'Processing graph loader {data_idx + 1}/{num_datasets}')
             graph_loader = self._create_graph_loader(data_name)
             dataset_len = len(graph_loader)
@@ -277,6 +339,15 @@ class Pretrainer:
                         start_loader_time=start_loader_time,
                         batches_done=batch_idx + 1
                     )
+
+            self._save_temp_checkpoint(
+                data_name=data_name,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch,
+                step_type="graph",
+                data_idx=data_idx
+            )
 
             del graph_loader
             torch.cuda.empty_cache()
@@ -404,3 +475,26 @@ class Pretrainer:
         graph_loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=False,
                                   num_workers=self.configs.num_workers, persistent_workers=False)
         return graph_loader
+
+    def _save_temp_checkpoint(self, data_name, optimizer, scheduler, epoch, step_type="node", data_idx=0):
+        temp_model_path = os.path.join(
+            self.tmp_checkpoint_dir,
+            f'tmp_{step_type}_{data_name}_epoch_{epoch}.pth'
+        )
+        temp_config = self.configs.__dict__.copy()
+        temp_config['resume_from'] = {
+            'epoch': epoch,
+            'step_type': step_type,
+            'last_data_name': data_name,
+            'last_data_idx': data_idx,
+            'next_step_type': step_type
+        }
+        save_checkpoint(
+            model=self.model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            config=temp_config,
+            filepath=temp_model_path
+        )
+        self.logger.info(f"Saved temporary checkpoint: {temp_model_path}")

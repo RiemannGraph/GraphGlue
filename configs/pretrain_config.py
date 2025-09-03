@@ -36,7 +36,7 @@ class PretrainConfig(ModelConfig):
     save_interval: int = 10
     inter_loss_interval: int = 1
     resume_checkpoint: bool = False
-
+    resume_temp_checkpoint: bool = False
     # Loss & Graph
     knn: int = 15
 
@@ -97,6 +97,8 @@ def get_pretrain_parser():
                         help="Compute inter_loss every N epochs")
     parser.add_argument('--resume_checkpoint', action='store_true',
                         help='Whether to resume from latest checkpoint')
+    parser.add_argument('--resume_temp_checkpoint', action='store_true',
+                        help='Whether to resume from temp checkpoint')
 
     # Loss & Graph
     parser.add_argument('--knn', type=int, default=30,
