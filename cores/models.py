@@ -1,14 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader, NeighborLoader
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
 from typing import List, Optional
-import gc
+
+EPS = 1e-6
 
 
 class PTGB(nn.Module):
@@ -219,8 +218,9 @@ class RPGraphFM(nn.Module):
 
         :return: PT matrix: torch.Tensor
         """
-
-        U, _, VT = torch.linalg.svd(basis_dst @ basis_src.transpose(-1, -2))
+        x = basis_dst @ basis_src.transpose(-1, -2)
+        x = x + EPS * torch.eye(x.size(-1), device=x.device, dtype=x.dtype)
+        U, _, VT = torch.linalg.svd(x, full_matrices=False)
         P = U @ VT
         return P
 
@@ -234,7 +234,7 @@ class RPGraphFM(nn.Module):
         :return: log ratio: torch.Tensor
         """
         vol_src, vol_dst = torch.det(basis_src.transpose(-1, -2) @ basis_src), torch.det(basis_dst.transpose(-1, -2) @ basis_dst)
-        abs_vol_src_stable = torch.sqrt(vol_src ** 2 + 1e-6)
-        abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + 1e-6)
+        abs_vol_src_stable = torch.sqrt(vol_src ** 2 + EPS)
+        abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + EPS)
         log_r = torch.log(abs_vol_dst_stable) - torch.log(abs_vol_src_stable)
         return log_r
