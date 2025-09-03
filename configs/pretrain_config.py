@@ -157,6 +157,12 @@ def parse_pretrain_config() -> PretrainConfig:
 
     # Path
     config.log_path = "logs/pretrain/pretrain.log"
+    dir_name = ""
+    for d in config.pretrain_single_graph_data:
+        dir_name += f"{d}_"
+    for d in config.pretrain_multi_graph_data:
+        dir_name += f"{d}_"
+    config.checkpoint_dir = f"checkpoints/pretrain/{dir_name[:-1]}"
 
     if args.config_save_path:
         save_config_to_yaml(config, args.config_save_path)
