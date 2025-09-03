@@ -13,6 +13,7 @@ class PretrainConfig(ModelConfig):
     root: str = "./datasets"
 
     # For Node2Vec, data like KG that without node features
+    nv_dim: int = 128
     nv_batch_size: int = 128
     nv_walk_length: int = 20
     nv_context_size: int = 10
@@ -51,6 +52,8 @@ def get_pretrain_parser():
     parser.add_argument('--root', type=str, default="./datasets")
 
     # Node2Vec parameters (for KGs without node features)
+    parser.add_argument('--nv_dim', type=int, default=128,
+                        help='dimension of node2vec embedding')
     parser.add_argument('--nv_batch_size', type=int, default=128,
                         help='Batch size for Node2Vec training (default: 128)')
     parser.add_argument('--nv_walk_length', type=int, default=20,
@@ -72,7 +75,7 @@ def get_pretrain_parser():
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for data loading')
     parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of workers for data loading')
@@ -80,7 +83,7 @@ def get_pretrain_parser():
     # Training
     parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')
-    parser.add_argument('--lr_pretrain', type=float, default=3e-3,
+    parser.add_argument('--lr_pretrain', type=float, default=3e-5,
                         help='Learning rate for pretraining')
     parser.add_argument('--pretrain_weight_decay', type=float, default=0,
                         help='Weight decay for Adam optimizer')

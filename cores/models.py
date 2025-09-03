@@ -218,10 +218,9 @@ class RPGraphFM(nn.Module):
 
         :return: PT matrix: torch.Tensor
         """
-        x = basis_dst @ basis_src.transpose(-1, -2)
-        x = x + EPS * torch.eye(x.size(-1), device=x.device, dtype=x.dtype)
-        U, _, VT = torch.linalg.svd(x, full_matrices=False)
-        P = U @ VT
+        g = basis_src @ basis_src.transpose(-1, -2)
+        x = basis_src @ basis_dst.transpose(-1, -2)
+        P = torch.linalg.solve(g, x)
         return P
 
     @staticmethod

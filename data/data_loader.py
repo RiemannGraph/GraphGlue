@@ -25,7 +25,7 @@ def load_pretrain_single_graph_data(configs, data_name):
         dataset = Reddit(f"{root}/{data_name}")
         data = dataset[0]
     elif data_name == 'FB15k_237':
-        transform = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
+        transform = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
