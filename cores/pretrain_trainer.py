@@ -227,7 +227,7 @@ class Pretrainer:
                     self._log_progress(
                         epoch=epoch,
                         loader_type="Node",
-                        loader_idx=data_idx,
+                        loader_idx=data_idx + 1,
                         batch_idx=batch_idx,
                         dataset_len=dataset_len,
                         loss=intra_loss.item(),
@@ -270,7 +270,7 @@ class Pretrainer:
                     self._log_progress(
                         epoch=epoch,
                         loader_type="Graph",
-                        loader_idx=data_idx,
+                        loader_idx=data_idx + 1,
                         batch_idx=batch_idx,
                         dataset_len=dataset_len,
                         loss=intra_loss.item(),
