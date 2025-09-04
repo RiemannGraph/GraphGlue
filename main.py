@@ -13,7 +13,6 @@ def main():
 
     trainer = Pretrainer(config)
     trainer.train()
-    trainer.register_from_loaders()
 
     # config = parse_adaption_config()
     #

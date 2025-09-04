@@ -1,7 +1,9 @@
 import torch
+import torch.nn.functional as F
+from torch_geometric.loader import DataLoader, NeighborLoader
+from torch_geometric.transforms import RootedEgoNets, Compose
 from cores.models import RPGraphFM
 from data.data_loader import load_pretrain_single_graph_data, load_pretrain_multi_graph_data
-from torch_geometric.loader import DataLoader, NeighborLoader
 from utils.logger import create_logger
 from utils.checkpoints import (
     save_checkpoint,
@@ -9,7 +11,6 @@ from utils.checkpoints import (
     get_latest_checkpoint,
     cleanup_old_checkpoints)
 import os
-from torch_geometric.transforms import RootedEgoNets, Compose
 from data.data_transform import RenameFromRootedEgoNets
 from utils.tools import format_time
 import time
@@ -135,61 +136,6 @@ class Pretrainer:
 
             cleanup_old_checkpoints(self.tmp_checkpoint_dir, keep_last=3)
 
-    @torch.no_grad()
-    def register_from_loaders(self):
-        if self.final_model_path:
-            load_checkpoint(self.final_model_path, self.model,
-                            map_location='cuda' if torch.cuda.is_available() else 'cpu')
-        self.model.eval()
-        proto_z_list = []
-        proto_z_tan_list = []
-
-        num_node_level_datasets = len(self.pretrain_single_graph_data)
-        if num_node_level_datasets > 0:
-            for data_name in self.pretrain_single_graph_data:
-                z_parts, z_tan_parts = [], []
-                loader = self._create_node_loader(data_name)
-                for data in loader:
-                    data = data.to(self.model.device)
-                    z, z_tan = self.model(data, data.batch_graph_nums)
-                    z_parts.append(z[: loader.batch_size].cpu())
-                    z_tan_parts.append(z_tan[: loader.batch_size].cpu())
-
-                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)  # [1, d]
-                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
-                proto_z_list.append(z_proto)
-                proto_z_tan_list.append(z_tan_proto)
-
-                del loader
-                gc.collect()
-
-        num_graph_level_datasets = len(self.pretrain_multi_graph_data)
-        if num_graph_level_datasets > 0:
-            for data_name in self.pretrain_multi_graph_data:
-                z_parts, z_tan_parts = [], []
-                loader = self._create_graph_loader(data_name)
-                for data in loader:
-                    data = data.to(self.device)
-                    z, z_tan = self.model(data, data.batch_size)
-                    z_parts.append(z.cpu())
-                    z_tan_parts.append(z_tan.cpu())
-                z_proto = torch.cat(z_parts, dim=0).mean(dim=0, keepdim=True)
-                z_tan_proto = torch.cat(z_tan_parts, dim=0).mean(dim=0, keepdim=True)
-                proto_z_list.append(z_proto)
-                proto_z_tan_list.append(z_tan_proto)
-
-                del loader
-                gc.collect()
-
-        if not proto_z_list:
-            raise ValueError("No loaders provided or no data processed.")
-
-        final_proto_z = torch.cat(proto_z_list, dim=0)  # [K, d]
-        final_proto_z_tan = torch.cat(proto_z_tan_list, dim=0)  # [K, M, d]
-        self.model.register_prototypes(final_proto_z, final_proto_z_tan)
-
-        return self.model
-
     def _train_epoch(self, optimizer, scheduler, epoch, resume_from=None):
         if self.start_time is None:
             self.start_time = time.time()
@@ -210,7 +156,7 @@ class Pretrainer:
 
         # Phase 2: Inter Loss
         if epoch % self.configs.inter_loss_interval == 0:
-            inter_loss = self._compute_inter_loss(optimizer, epoch)
+            inter_loss = self._train_inter_loss(optimizer, epoch)
             if inter_loss is not None:
                 total_loss += inter_loss
                 total_batches += 1
@@ -224,59 +170,119 @@ class Pretrainer:
         return total_loss / total_batches
 
     def _train_node_level(self, optimizer, scheduler, epoch, resume_from=None):
+        return self._train_one_type(
+            data_names=self.pretrain_single_graph_data,
+            loader_creator=self._create_node_loader,
+            type_str='node',
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            resume_from=resume_from
+        )
+
+    def _train_graph_level(self, optimizer, scheduler, epoch, resume_from=None):
+        return self._train_one_type(
+            data_names=self.pretrain_multi_graph_data,
+            loader_creator=self._create_graph_loader,
+            type_str='graph',
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            resume_from=resume_from
+        )
+
+    def _train_one_type(self, data_names, loader_creator, type_str, optimizer, scheduler, epoch, resume_from=None):
+        """
+        type_str: 'node' or 'graph'
+        loader_creator: _create_node_loader or _create_graph_loader
+        """
         total_loss = 0.0
         total_batches = 0
-        num_datasets = len(self.pretrain_single_graph_data)
 
+        num_datasets = len(data_names)
         if num_datasets == 0:
             return {'loss': 0.0, 'batches': 0}
 
         start_idx = 0
-
         if resume_from:
-            if resume_from['step_type'] == 'node':
+            if resume_from['step_type'] == type_str:
                 try:
-                    start_idx = self.pretrain_single_graph_data.index(resume_from['last_data_name']) + 1
+                    start_idx = data_names.index(resume_from['last_data_name']) + 1
                 except ValueError:
                     start_idx = 0
                 if start_idx >= num_datasets:
                     return {'loss': 0.0, 'batches': 0}
 
-            elif resume_from['step_type'] == 'graph':
-                self.logger.info("Resuming from 'graph' stage. Skipping all node-level training.")
+            elif resume_from['step_type'] in ['node', 'graph']:
+                self.logger.info(
+                    f"Resuming from '{resume_from['step_type']}' stage. Skipping all {type_str}-level training.")
                 return {'loss': 0.0, 'batches': 0}
 
         if start_idx >= num_datasets:
             return {'loss': 0.0, 'batches': 0}
 
         if start_idx > 0:
-            self.logger.info(
-                f"Resuming node-level from dataset {start_idx}: {self.pretrain_single_graph_data[start_idx]}")
+            self.logger.info(f"Resuming {type_str}-level from dataset {start_idx}: {data_names[start_idx]}")
 
-        for data_idx, data_name in enumerate(self.pretrain_single_graph_data):
+        for data_idx, data_name in enumerate(data_names):
             if data_idx < start_idx:
                 continue
 
-            self.logger.info(f'Processing node loader {data_idx + 1}/{num_datasets}')
-            node_loader = self._create_node_loader(data_name)
-            dataset_len = len(node_loader)
+            self.logger.info(f'Processing {type_str} loader {data_idx + 1}/{num_datasets}')
+            loader = loader_creator(data_name)
+            dataset_len = len(loader)
             start_loader_time = time.time()
 
-            for batch_idx, data in enumerate(node_loader):
+            for batch_idx, data in enumerate(loader):
                 optimizer.zero_grad()
                 data = data.to(self.device)
-                z, z_tan = self.model(data, data.batch_graph_nums)
-                intra_loss = self.model.loss(z, z_tan, data.origin_edge_index, node_loader.batch_size)
+
+                # -------------Forward ------------
+                if type_str == 'node':
+                    batch_size_arg = data.batch_graph_nums
+                else:  # 'graph'
+                    batch_size_arg = data.batch_size
+
+                z, z_tan = self.model(data, batch_size_arg)
+
+                # ------------ Edge Index -----------
+                if type_str == 'node':
+                    edge_index = data.origin_edge_index
+                    loss_batch_size = loader.batch_size
+                else:  # 'graph'
+                    edge_index, _ = self.model.knn_graph(z, self.configs.knn)
+                    loss_batch_size = None
+
+                # --------------- Loss--------------
+                intra_loss = self.model.loss(z, z_tan, edge_index, batch_size=loss_batch_size)
+
+                if epoch >= self.configs.warmup_epochs:
+                    proto_loss = self.model.prototype_loss(data_name, z)
+                    intra_loss += proto_loss
+
                 intra_loss.backward()
                 optimizer.step()
+
+                # ------------- Update Prototype-------------
+                z_mean = z.detach()
+                z_tan_mean = z_tan.detach()
+                if loss_batch_size and type_str == 'node':
+                    z_mean = z_mean[:loss_batch_size].mean(0)
+                    z_tan_mean = z_tan_mean[:loss_batch_size].mean(0)
+                else:
+                    z_mean = z_mean.mean(0)
+                    z_tan_mean = z_tan_mean.mean(0)
+
+                self.model.update_prototype(data_name, z_mean, z_tan_mean)
 
                 total_loss += intra_loss.item()
                 total_batches += 1
 
+                # -------------- Logging ----------------
                 if batch_idx % self.configs.log_interval == 0:
                     self._log_progress(
                         epoch=epoch,
-                        loader_type="Node",
+                        loader_type=type_str,
                         loader_idx=data_idx + 1,
                         batch_idx=batch_idx,
                         dataset_len=dataset_len,
@@ -285,143 +291,33 @@ class Pretrainer:
                         batches_done=batch_idx + 1
                     )
 
+            # -------------Checkpoint -----------------
             self._save_temp_checkpoint(
                 data_name=data_name,
                 optimizer=optimizer,
                 scheduler=scheduler,
                 epoch=epoch,
-                step_type="node",
+                step_type=type_str,
                 data_idx=data_idx
             )
-
-            del node_loader
+            del loader
             torch.cuda.empty_cache()
 
         return {'loss': total_loss, 'batches': total_batches}
 
-    def _train_graph_level(self, optimizer, scheduler, epoch, resume_from=None):
-        total_loss = 0.0
-        total_batches = 0
-        num_datasets = len(self.pretrain_multi_graph_data)
+    def _train_inter_loss(self, optimizer, epoch):
+        dataset_names, all_proto_z, _ = self.model.prototype_manager.get_all_prototypes()
+        if all_proto_z is None or len(dataset_names) < 2:
+            return 0.0
 
-        if num_datasets == 0:
-            return {'loss': 0.0, 'batches': 0}
-
-        start_idx = 0
-
-        if resume_from:
-            if resume_from['step_type'] == 'graph':
-                try:
-                    start_idx = self.pretrain_multi_graph_data.index(resume_from['last_data_name']) + 1
-                except ValueError:
-                    start_idx = 0
-                if start_idx >= num_datasets:
-                    return {'loss': 0.0, 'batches': 0}
-
-            elif resume_from['step_type'] == 'node':
-                self.logger.info("Resuming from 'node' stage. Starting graph-level from first dataset.")
-                start_idx = 0
-
-        if start_idx >= num_datasets:
-            return {'loss': 0.0, 'batches': 0}
-
-        if start_idx > 0:
-            self.logger.info(
-                f"Resuming graph-level from dataset {start_idx}: {self.pretrain_multi_graph_data[start_idx]}")
-
-        for data_idx, data_name in enumerate(self.pretrain_multi_graph_data):
-            if data_idx < start_idx:
-                continue
-
-            self.logger.info(f'Processing graph loader {data_idx + 1}/{num_datasets}')
-            graph_loader = self._create_graph_loader(data_name)
-            dataset_len = len(graph_loader)
-            start_loader_time = time.time()
-
-            for batch_idx, data in enumerate(graph_loader):
-                optimizer.zero_grad()
-                data = data.to(self.device)
-                z, z_tan = self.model(data, data.batch_size)
-                edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                intra_loss = self.model.loss(z, z_tan, edge_index)
-                intra_loss.backward()
-                optimizer.step()
-
-                total_loss += intra_loss.item()
-                total_batches += 1
-
-                if batch_idx % self.configs.log_interval == 0:
-                    self._log_progress(
-                        epoch=epoch,
-                        loader_type="Graph",
-                        loader_idx=data_idx + 1,
-                        batch_idx=batch_idx,
-                        dataset_len=dataset_len,
-                        loss=intra_loss.item(),
-                        start_loader_time=start_loader_time,
-                        batches_done=batch_idx + 1
-                    )
-
-            self._save_temp_checkpoint(
-                data_name=data_name,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                epoch=epoch,
-                step_type="graph",
-                data_idx=data_idx
-            )
-
-            del graph_loader
-            torch.cuda.empty_cache()
-
-        return {'loss': total_loss, 'batches': total_batches}
-
-    def _collect_all_embeddings_for_inter(self):
-        all_z = []
-        all_z_tan = []
-        for data_name in self.pretrain_single_graph_data:
-            data = load_pretrain_single_graph_data(self.configs, data_name)
-            node_loader = DataLoader([data], batch_size=1, shuffle=False,
-                                  num_workers=self.configs.num_workers, persistent_workers=False)
-            for data in node_loader:
-                data = data.to(self.device)
-                z, z_tan = self.model(data, data.batch_size)
-                all_z.append(z)
-                all_z_tan.append(z_tan)
-            del node_loader
-            torch.cuda.empty_cache()
-
-        for data_name in self.pretrain_multi_graph_data:
-            graph_loader = self._create_graph_loader(data_name)
-            for batch in graph_loader:
-                batch = batch.to(self.device)
-                z, z_tan = self.model(batch, batch.batch_size)
-                all_z.append(z)
-                all_z_tan.append(z_tan)
-            del graph_loader
-            torch.cuda.empty_cache()
-
-        if len(all_z) == 0:
-            return None, None
-
-        all_z = torch.cat(all_z, dim=0).to(self.device)
-        all_z_tan = torch.cat(all_z_tan, dim=0).to(self.device)
-        return all_z, all_z_tan
-
-    def _compute_inter_loss(self, optimizer, epoch):
-        all_z, all_z_tan = self._collect_all_embeddings_for_inter()
-        if all_z is None:
-            self.logger.warning("Not enough embeddings for inter-loss.")
-            return None
+        sim = torch.mm(all_proto_z, all_proto_z.t()) / self.configs.prototype_temperature
+        labels = torch.arange(len(dataset_names), device=all_proto_z.device)
+        inter_loss = F.cross_entropy(sim, labels)
 
         optimizer.zero_grad()
-        edge_index, _ = self.model.knn_graph(all_z, self.configs.knn)
-        inter_loss = self.model.loss(all_z, all_z_tan, edge_index)
-
         inter_loss.backward()
         optimizer.step()
 
-        self.logger.info(f'Epoch {epoch} | Inter Loss: {inter_loss.item():.6f}')
         return inter_loss.item()
 
     def _log_progress(self, epoch, loader_type, loader_idx, batch_idx, dataset_len, loss, start_loader_time,
@@ -479,7 +375,7 @@ class Pretrainer:
             self.epoch_times.append(time.time() - start_epoch_time)
 
     def _create_node_loader(self, data_name):
-        dataset, data = load_pretrain_single_graph_data(self.configs, data_name)
+        data = load_pretrain_single_graph_data(self.configs, data_name)
         node_loader = NeighborLoader(data, batch_size=self.configs.batch_size,
                                      num_neighbors=self.configs.num_neighbors,
                                      shuffle=False, num_workers=self.configs.num_workers,

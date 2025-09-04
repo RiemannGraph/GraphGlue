@@ -37,6 +37,7 @@ class PretrainConfig(ModelConfig):
     inter_loss_interval: int = 1
     resume_checkpoint: bool = False
     resume_temp_checkpoint: bool = False
+    warmup_epochs: int = 1
     # Loss & Graph
     knn: int = 15
 
@@ -99,6 +100,8 @@ def get_pretrain_parser():
                         help='Whether to resume from latest checkpoint')
     parser.add_argument('--resume_temp_checkpoint', action='store_true',
                         help='Whether to resume from temp checkpoint')
+    parser.add_argument('--warmup_epochs', type=int, default=1,
+                        help="Number of warmup epochs to compute prototype loss")
 
     # Loss & Graph
     parser.add_argument('--knn', type=int, default=30,
@@ -156,7 +159,26 @@ def parse_pretrain_config() -> PretrainConfig:
         inter_loss_interval=args.inter_loss_interval,
         resume_checkpoint=args.resume_checkpoint,
         resume_temp_checkpoint=args.resume_temp_checkpoint,
-        knn=args.knn
+        knn=args.knn,
+        warmup_epochs=args.warmup_epochs,
+
+        n_layers=args.n_layers,
+        num_samples=args.num_samples,
+        in_dim=args.in_dim,
+        hid_dim=args.hid_dim,
+        att_dim=args.att_dim,
+        num_generators=args.num_generators,
+        bias=args.bias,
+        act_str=args.act_str,
+        drop=args.drop,
+        conv_name=args.conv_name,
+        normalize=args.normalize,
+        norm_str=args.norm_str,
+        temperature=args.temperature,
+        ema_alpha=args.ema_alpha,
+
+        regular_coef_pt=args.regular_coef_pt,
+        regular_coef_curv=args.regular_coef_curv
     )
 
     # Path

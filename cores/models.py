@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
 from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
-from typing import List, Optional
+from typing import List, Optional, Dict, Tuple, Any
 
 EPS = 1e-6
 
@@ -89,6 +90,8 @@ class RPGraphFM(nn.Module):
                                          configs.hid_dim, configs.hid_dim,
                                          configs.normalize, configs.bias,
                                          configs.norm_str, configs.act_str, configs.drop)
+        self.prototype_manager = RiemannianPrototypeManager(configs.hid_dim, configs.num_generators,
+                                                            configs.ema_alpha, configs.temperature)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
         self.geo_loss = GeometricPersistLoss(configs.regular_coef_pt, configs.regular_coef_curv)
@@ -156,32 +159,17 @@ class RPGraphFM(nn.Module):
 
         return ptg_loss + cl_loss + geo_loss
 
-    def register_prototypes(self, proto_z: torch.Tensor, proto_z_tan: torch.Tensor):
-        """
-        :param proto_z: [num_datasets, d]
-        :param proto_z_tan: [num_datasets, M, d]
-        """
-        self.register_buffer('proto_z', proto_z)
-        self.register_buffer('proto_z_tan', proto_z_tan)
+    @torch.no_grad()
+    def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+        z_mean = z_mean.detach()
+        z_tan_mean = z_tan_mean.detach()
+        self.prototype_manager.update_prototype(dataset_name, z_mean, z_tan_mean)
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
-                              error_msgs):
-        full_prefix = prefix if prefix else ""
-        keys_to_register = []
+    def get_all_prototypes(self):
+        return self.prototype_manager.get_all_prototypes()
 
-        if (full_prefix + 'proto_z') in state_dict:
-            keys_to_register.append('proto_z')
-        if (full_prefix + 'proto_z_tan') in state_dict:
-            keys_to_register.append('proto_z_tan')
-        if (full_prefix + 'is_global_prototypes_registered') in state_dict:
-            keys_to_register.append('is_global_prototypes_registered')
-
-        for key in keys_to_register:
-            if not hasattr(self, key):
-                self.register_buffer(key, torch.empty_like(state_dict[full_prefix + key], device='cpu'))
-
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
-                                      error_msgs)
+    def prototype_loss(self, dataset_name: str, z: torch.Tensor):
+        return self.prototype_manager.loss(dataset_name, z)
 
     def frozen(self):
         for param in self.parameters():
@@ -241,3 +229,90 @@ class RPGraphFM(nn.Module):
         abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + EPS)
         log_r = torch.log(abs_vol_dst_stable) - torch.log(abs_vol_src_stable)
         return log_r
+
+
+class RiemannianPrototypeManager(nn.Module):
+    """
+    EMA Riemannian prototype manager and updater
+    """
+    def __init__(self, hid_dim: int, num_generators: int, ema_alpha: float = 0.99, temperature: float = 1.0):
+        super().__init__()
+        self.hid_dim = hid_dim
+        self.num_generators = num_generators
+        self.ema_alpha = ema_alpha
+        self.temperature = temperature
+
+        # cache dict
+        self._proto_z_dict = {}       # name -> tensor
+        self._proto_z_tan_dict = {}   # name -> tensor
+
+        self.prototype_keys = []
+
+    @torch.no_grad()
+    def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+        if dataset_name not in self._proto_z_dict:
+            self._register_new_prototype(dataset_name, z_mean, z_tan_mean)
+        else:
+            alpha = self.ema_alpha
+            proto_z = self._proto_z_dict[dataset_name]
+            proto_z_tan = self._proto_z_tan_dict[dataset_name]
+
+            proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean)
+            proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean)
+
+    def loss(self, dataset_name: str, z: torch.Tensor):
+        names, all_proto_z, _ = self.get_all_prototypes()
+        if all_proto_z is None or dataset_name not in names:
+            return 0.0
+
+        sim = torch.mm(z, all_proto_z.t()) / self.temperature  # [N, num_datasets]
+        labels = torch.tensor([names.index(dataset_name)] * z.shape[0], device=z.device)
+        return F.cross_entropy(sim, labels)
+
+    def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+        p_z=  z_mean.detach()
+        p_z_tan = z_tan_mean.detach()
+
+        self.register_buffer(f'proto_z_{dataset_name}', p_z)
+        self.register_buffer(f'proto_z_tan_{dataset_name}', p_z_tan)
+
+        self._proto_z_dict[dataset_name] = p_z
+        self._proto_z_tan_dict[dataset_name] = p_z_tan
+
+        if dataset_name not in self.prototype_keys:
+            self.prototype_keys.append(dataset_name)
+
+    def get_prototype(self, dataset_name: str):
+        return self._proto_z_dict.get(dataset_name), self._proto_z_tan_dict.get(dataset_name)
+
+    def get_all_prototypes(self):
+        names = self.prototype_keys
+        if not names:
+            return names, None, None
+        return (
+            names,
+            torch.stack([self._proto_z_dict[name] for name in names], dim=0),
+            torch.stack([self._proto_z_tan_dict[name] for name in names], dim=0)
+        )
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
+
+        prefix_str = prefix if prefix else ""
+        self._proto_z_dict.clear()
+        self._proto_z_tan_dict.clear()
+        self.prototype_keys.clear()
+
+        for key in state_dict.keys():
+            if key.startswith(prefix_str + 'proto_z_') and not key.startswith(prefix_str + 'proto_z_tan_'):
+                suffix = key[len(prefix_str + 'proto_z_'):]
+                dataset_name = suffix
+
+                p_z = getattr(self, f'proto_z_{dataset_name}')
+                p_z_tan = getattr(self, f'proto_z_tan_{dataset_name}')
+
+                self._proto_z_dict[dataset_name] = p_z
+                self._proto_z_tan_dict[dataset_name] = p_z_tan
+                self.prototype_keys.append(dataset_name)

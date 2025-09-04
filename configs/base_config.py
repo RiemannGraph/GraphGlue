@@ -13,9 +13,9 @@ class ModelConfig:
 
     """Shared model architecture configuration"""
 
-    n_layers: int = 3
-    num_samples: Optional[int] = 100
-    in_dim: int = 100
+    n_layers: int = 2
+    num_samples: Optional[int] = 500
+    in_dim: int = 128
     hid_dim: int = 256
     att_dim: int = 512
     num_generators: int = 64
@@ -26,6 +26,7 @@ class ModelConfig:
     normalize: bool = True
     norm_str: str = "layer_norm"
     temperature: float = 1.0
+    ema_alpha: float = 0.99
 
     regular_coef_pt: float = 0.5
     regular_coef_curv: float = .5
@@ -35,7 +36,7 @@ def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        default=["ogbn-arxiv", "AmazonProducts", "Reddit", "FB15k_237"],
+                        default=["ogbn-arxiv", "Computers", "Reddit", "FB15k_237"],
                         help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
                         default=["PROTEINS", "HIV"],
@@ -66,6 +67,8 @@ def add_model_config(parser: ArgumentParser):
                        help="Normalization type")
     group.add_argument('--temperature', type=float, default=1.0,
                        help='Temperature')
+    parser.add_argument('--ema_alpha', type=float, default=0.99,
+                        help='Exponential moving average coefficient')
     group.add_argument('--regular_coef_pt', type=float, default=0.5,
                        help='Regularization coefficient of PT')
     group.add_argument('--regular_coef_curv', type=float, default=0.5,

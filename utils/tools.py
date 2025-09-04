@@ -13,4 +13,4 @@ def set_seed(seed):
 
 
 def format_time(t):
-    return str(timedelta(seconds=int(t)))
+    return str(timedelta(seconds=int(t))) if t is not None else None
