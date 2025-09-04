@@ -22,8 +22,12 @@ class RPGPrompt(nn.Module):
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
         self.pretrained_model = pretrained_model
-        self.prompt = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
-        nn.init.kaiming_normal_(self.prompt.data)
+
+        self.prompt_z = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
+        nn.init.kaiming_normal_(self.prompt_z.data)
+        self.prompt_z_tan = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
+        nn.init.kaiming_normal_(self.prompt_z_tan.data)
+
         self.align_coef = configs.align_coef
         num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
         self.gated_func = FeedForwardLayer(configs.hid_dim, configs.hid_dim, num_datasets,
@@ -40,9 +44,10 @@ class RPGPrompt(nn.Module):
         graph = graph.clone()
         graph.x = self.input_lin(graph.x)
         z, z_tan = self.pretrained_model(graph, batch_graph_nums)
+        z = z @ self.prompt_z
         weights = self.gated_func(z)    # [*, K]
         z_tan_align = torch.einsum('ij,jkl->ikl', weights, self.pretrained_model.proto_z_tan)   # [*, M, d]
-        z_tan_adapt = z_tan @ self.prompt
+        z_tan_adapt = z_tan @ self.prompt_z_tan
         align_loss = self.align_coef * torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
         ptgb_loss = self.ptg_loss(z_tan_align)
         return z, z_tan_adapt, align_loss + ptgb_loss
