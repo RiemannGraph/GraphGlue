@@ -264,16 +264,16 @@ class Pretrainer:
                 optimizer.step()
 
                 # ------------- Update Prototype-------------
-                z_mean = z.detach()
-                z_tan_mean = z_tan.detach()
                 if loss_batch_size and type_str == 'node':
-                    z_mean = z_mean[:loss_batch_size].mean(0)
-                    z_tan_mean = z_tan_mean[:loss_batch_size].mean(0)
+                    z_mean = z[:loss_batch_size].mean(dim=0).detach().clone()
+                    z_tan_mean = z_tan[:loss_batch_size].mean(dim=0).detach().clone()
                 else:
-                    z_mean = z_mean.mean(0)
-                    z_tan_mean = z_tan_mean.mean(0)
+                    z_mean = z.mean(dim=0).detach().clone()
+                    z_tan_mean = z_tan.mean(dim=0).detach().clone()
 
                 self.model.update_prototype(data_name, z_mean, z_tan_mean)
+
+                del z_mean, z_tan_mean, data, z, z_tan
 
                 total_loss += intra_loss.item()
                 total_batches += 1

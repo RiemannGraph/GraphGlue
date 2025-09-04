@@ -3,12 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data
-from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
+from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
-from collections import OrderedDict
 
 EPS = 1e-6
 
@@ -161,7 +160,7 @@ class RPGraphFM(nn.Module):
 
         return ptg_loss + cl_loss + geo_loss
 
-    def load_state_dict(self, state_dict: OrderedDict, strict: bool = True):
+    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
         proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')
         proto_z_tan_pattern = re.compile(r'^prototype_manager\.proto_z_tan_([a-zA-Z0-9_]+)$')
         datasets_to_register = set()
@@ -188,7 +187,7 @@ class RPGraphFM(nn.Module):
                 self.prototype_manager.register_buffer(f'proto_z_tan_{safe_name}', tan_tensor)
 
         super().load_state_dict(state_dict, strict=strict)
-        self.prototype_manager._rebuild_cache_from_buffers()
+        self.prototype_manager.rebuild_cache_from_buffers()
 
     @torch.no_grad()
     def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
@@ -284,12 +283,6 @@ class RiemannianPrototypeManager(nn.Module):
         # For safety: keep a mapping from sanitized name to original
         self._sanitized_to_original: Dict[str, str] = {}
 
-    def _sanitize_name(self, name: str) -> str:
-        """
-        Convert dataset name to a valid Python identifier for buffer names.
-        """
-        return re.sub(r'[^a-zA-Z0-9_]', '_', name)
-
     @torch.no_grad()
     def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
         """
@@ -310,7 +303,7 @@ class RiemannianPrototypeManager(nn.Module):
         """
         Register a new prototype as buffer and update caches.
         """
-        safe_name = self._sanitize_name(dataset_name)
+        safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', dataset_name)
 
         # Clone and detach
         p_z = z_mean.detach().clone()
@@ -373,7 +366,7 @@ class RiemannianPrototypeManager(nn.Module):
         return F.cross_entropy(sim, labels)
 
     @torch.no_grad()
-    def _rebuild_cache_from_buffers(self):
+    def rebuild_cache_from_buffers(self):
         """
         Rebuild _proto_z_dict and prototype_keys from registered buffers.
         Called by parent module after loading state_dict.

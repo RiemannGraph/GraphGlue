@@ -53,7 +53,7 @@ def get_pretrain_parser():
     parser.add_argument('--root', type=str, default="./datasets")
 
     # Node2Vec parameters (for KGs without node features)
-    parser.add_argument('--nv_dim', type=int, default=128,
+    parser.add_argument('--nv_dim', type=int, default=64,
                         help='dimension of node2vec embedding')
     parser.add_argument('--nv_batch_size', type=int, default=128,
                         help='Batch size for Node2Vec training (default: 128)')
@@ -84,7 +84,7 @@ def get_pretrain_parser():
     # Training
     parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')
-    parser.add_argument('--lr_pretrain', type=float, default=3e-5,
+    parser.add_argument('--lr_pretrain', type=float, default=3e-4,
                         help='Learning rate for pretraining')
     parser.add_argument('--pretrain_weight_decay', type=float, default=0,
                         help='Weight decay for Adam optimizer')

@@ -43,15 +43,15 @@ def add_model_config(parser: ArgumentParser):
                         help='graph-level pretraining datasets')
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
-    group.add_argument('--num_samples', type=int, default=500,
+    group.add_argument('--num_samples', type=int, default=100,
                        help='Number of adjacent edge samples')
-    group.add_argument('--in_dim', type=int, default=128,
+    group.add_argument('--in_dim', type=int, default=64,
                        help='Input feature dimension')
-    group.add_argument('--hid_dim', type=int, default=512,
+    group.add_argument('--hid_dim', type=int, default=256,
                        help='Hidden dimension')
-    group.add_argument('--att_dim', type=int, default=512,
+    group.add_argument('--att_dim', type=int, default=256,
                        help='Attention dimension (if used)')
-    group.add_argument('--num_generators', type=int, default=64,
+    group.add_argument('--num_generators', type=int, default=32,
                        help='Number of generators in FM')
     group.add_argument('--conv_name', type=str, default='gcn', choices=['gcn', 'sage', 'gin'],
                        help='GNN layer type')
