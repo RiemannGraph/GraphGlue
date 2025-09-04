@@ -7,6 +7,8 @@ from cores.layers import ActivateModule, NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
 from data.data_process import search_adjacent_edges
 from typing import List, Optional, Dict, Tuple, Any
+import re
+from collections import OrderedDict
 
 EPS = 1e-6
 
@@ -159,6 +161,35 @@ class RPGraphFM(nn.Module):
 
         return ptg_loss + cl_loss + geo_loss
 
+    def load_state_dict(self, state_dict: OrderedDict, strict: bool = True):
+        proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')
+        proto_z_tan_pattern = re.compile(r'^prototype_manager\.proto_z_tan_([a-zA-Z0-9_]+)$')
+        datasets_to_register = set()
+
+        for key in state_dict.keys():
+            match_z = proto_z_pattern.match(key)
+            match_tan = proto_z_tan_pattern.match(key)
+
+            if match_z:
+                datasets_to_register.add(match_z.group(1))  # e.g., 'Computers'
+            elif match_tan:
+                datasets_to_register.add(match_tan.group(1))  # e.g., 'Computers'
+
+        for safe_name in datasets_to_register:
+            z_key = f'prototype_manager.proto_z_{safe_name}'
+            tan_key = f'prototype_manager.proto_z_tan_{safe_name}'
+
+            if not hasattr(self.prototype_manager, f'proto_z_{safe_name}'):
+                z_tensor = state_dict[z_key].clone()
+                self.prototype_manager.register_buffer(f'proto_z_{safe_name}', z_tensor)
+
+            if not hasattr(self.prototype_manager, f'proto_z_tan_{safe_name}'):
+                tan_tensor = state_dict[tan_key].clone()
+                self.prototype_manager.register_buffer(f'proto_z_tan_{safe_name}', tan_tensor)
+
+        super().load_state_dict(state_dict, strict=strict)
+        self.prototype_manager._rebuild_cache_from_buffers()
+
     @torch.no_grad()
     def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
         z_mean = z_mean.detach()
@@ -233,7 +264,10 @@ class RPGraphFM(nn.Module):
 
 class RiemannianPrototypeManager(nn.Module):
     """
-    EMA Riemannian prototype manager and updater
+    EMA Riemannian prototype manager and updater.
+
+    Manages per-dataset prototypes (z and z_tan) with EMA updates.
+    Supports contrastive loss between node embeddings and prototypes.
     """
     def __init__(self, hid_dim: int, num_generators: int, ema_alpha: float = 0.99, temperature: float = 1.0):
         super().__init__()
@@ -242,14 +276,25 @@ class RiemannianPrototypeManager(nn.Module):
         self.ema_alpha = ema_alpha
         self.temperature = temperature
 
-        # cache dict
-        self._proto_z_dict = {}       # name -> tensor
-        self._proto_z_tan_dict = {}   # name -> tensor
+        # Runtime caches (not saved in state_dict)
+        self._proto_z_dict: Dict[str, torch.Tensor] = {}        # dataset_name -> tensor (on device)
+        self._proto_z_tan_dict: Dict[str, torch.Tensor] = {}    # dataset_name -> tensor (on device)
+        self.prototype_keys: List[str] = []  # ordered list of dataset names
 
-        self.prototype_keys = []
+        # For safety: keep a mapping from sanitized name to original
+        self._sanitized_to_original: Dict[str, str] = {}
+
+    def _sanitize_name(self, name: str) -> str:
+        """
+        Convert dataset name to a valid Python identifier for buffer names.
+        """
+        return re.sub(r'[^a-zA-Z0-9_]', '_', name)
 
     @torch.no_grad()
     def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+        """
+        Update or initialize prototype for a dataset using EMA.
+        """
         if dataset_name not in self._proto_z_dict:
             self._register_new_prototype(dataset_name, z_mean, z_tan_mean)
         else:
@@ -257,62 +302,113 @@ class RiemannianPrototypeManager(nn.Module):
             proto_z = self._proto_z_dict[dataset_name]
             proto_z_tan = self._proto_z_tan_dict[dataset_name]
 
+            # In-place EMA update
             proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean)
             proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean)
 
-    def loss(self, dataset_name: str, z: torch.Tensor):
-        names, all_proto_z, _ = self.get_all_prototypes()
-        if all_proto_z is None or dataset_name not in names:
-            return 0.0
-
-        sim = torch.mm(z, all_proto_z.t()) / self.temperature  # [N, num_datasets]
-        labels = torch.tensor([names.index(dataset_name)] * z.shape[0], device=z.device)
-        return F.cross_entropy(sim, labels)
-
     def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
-        p_z=  z_mean.detach()
-        p_z_tan = z_tan_mean.detach()
+        """
+        Register a new prototype as buffer and update caches.
+        """
+        safe_name = self._sanitize_name(dataset_name)
 
-        self.register_buffer(f'proto_z_{dataset_name}', p_z)
-        self.register_buffer(f'proto_z_tan_{dataset_name}', p_z_tan)
+        # Clone and detach
+        p_z = z_mean.detach().clone()
+        p_z_tan = z_tan_mean.detach().clone()
 
-        self._proto_z_dict[dataset_name] = p_z
-        self._proto_z_tan_dict[dataset_name] = p_z_tan
+        # Register as persistent buffers
+        self.register_buffer(f'proto_z_{safe_name}', p_z)
+        self.register_buffer(f'proto_z_tan_{safe_name}', p_z_tan)
+
+        # Cache original name -> tensor
+        # Note: getattr is safe here because we just registered it
+        self._proto_z_dict[dataset_name] = getattr(self, f'proto_z_{safe_name}')
+        self._proto_z_tan_dict[dataset_name] = getattr(self, f'proto_z_tan_{safe_name}')
 
         if dataset_name not in self.prototype_keys:
             self.prototype_keys.append(dataset_name)
+            self._sanitized_to_original[safe_name] = dataset_name
 
-    def get_prototype(self, dataset_name: str):
-        return self._proto_z_dict.get(dataset_name), self._proto_z_tan_dict.get(dataset_name)
+    def get_prototype(self, dataset_name: str) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Get prototype for a specific dataset.
+        """
+        return (
+            self._proto_z_dict.get(dataset_name),
+            self._proto_z_tan_dict.get(dataset_name)
+        )
 
-    def get_all_prototypes(self):
+    def get_all_prototypes(self) -> Tuple[List[str], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Get all prototypes as stacked tensors.
+        Returns:
+            (names, all_z: [N, d], all_z_tan: [N, d])
+        """
         names = self.prototype_keys
         if not names:
             return names, None, None
-        return (
-            names,
-            torch.stack([self._proto_z_dict[name] for name in names], dim=0),
-            torch.stack([self._proto_z_tan_dict[name] for name in names], dim=0)
-        )
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                      missing_keys, unexpected_keys, error_msgs)
+        all_z = torch.stack([self._proto_z_dict[name] for name in names], dim=0)
+        all_z_tan = torch.stack([self._proto_z_tan_dict[name] for name in names], dim=0)
+        return names, all_z, all_z_tan
 
-        prefix_str = prefix if prefix else ""
+    def loss(self, dataset_name: str, z: torch.Tensor) -> torch.Tensor:
+        """
+        Compute contrastive loss between node embeddings and all prototypes.
+        """
+        names, all_proto_z, _ = self.get_all_prototypes()
+        if all_proto_z is None or dataset_name not in names:
+            return z.new_zeros((), requires_grad=False)  # scalar on same device
+
+        # Ensure prototype is on same device
+        all_proto_z = all_proto_z.to(z.device)
+
+        # Similarity: [N_nodes, N_prototypes]
+        sim = torch.mm(z, all_proto_z.t()) / self.temperature
+
+        # Label: index of current dataset
+        label_idx = names.index(dataset_name)
+        labels = torch.full((z.shape[0],), label_idx, dtype=torch.long, device=z.device)
+
+        return F.cross_entropy(sim, labels)
+
+    @torch.no_grad()
+    def _rebuild_cache_from_buffers(self):
+        """
+        Rebuild _proto_z_dict and prototype_keys from registered buffers.
+        Called by parent module after loading state_dict.
+        """
         self._proto_z_dict.clear()
         self._proto_z_tan_dict.clear()
         self.prototype_keys.clear()
+        self._sanitized_to_original.clear()
 
-        for key in state_dict.keys():
-            if key.startswith(prefix_str + 'proto_z_') and not key.startswith(prefix_str + 'proto_z_tan_'):
-                suffix = key[len(prefix_str + 'proto_z_'):]
-                dataset_name = suffix
+        prefix = 'proto_z_'
+        tan_prefix = 'proto_z_tan_'
 
-                p_z = getattr(self, f'proto_z_{dataset_name}')
-                p_z_tan = getattr(self, f'proto_z_tan_{dataset_name}')
+        for name, buffer in self.named_buffers():
+            if name.startswith(prefix) and not name.startswith(tan_prefix):
+                safe_name = name[len(prefix):]
+                try:
+                    # Try to recover original name from previous mapping
+                    original_name = self._sanitized_to_original.get(safe_name, safe_name)
+                except:
+                    original_name = safe_name  # fallback
 
-                self._proto_z_dict[dataset_name] = p_z
-                self._proto_z_tan_dict[dataset_name] = p_z_tan
-                self.prototype_keys.append(dataset_name)
+                # Get both buffers
+                z_buf = getattr(self, name)
+                tan_name = f'{tan_prefix}{safe_name}'
+                if hasattr(self, tan_name):
+                    z_tan_buf = getattr(self, tan_name)
+                else:
+                    raise RuntimeError(f"Missing tangent prototype buffer: {tan_name}")
+
+                self._proto_z_dict[original_name] = z_buf
+                self._proto_z_tan_dict[original_name] = z_tan_buf
+                if original_name not in self.prototype_keys:
+                    self.prototype_keys.append(original_name)
+                    self._sanitized_to_original[safe_name] = original_name
+
+    def extra_repr(self) -> str:
+        return (f"hid_dim={self.hid_dim}, num_datasets={len(self.prototype_keys)}, "
+                f"ema_alpha={self.ema_alpha}, temperature={self.temperature}")
