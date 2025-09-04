@@ -154,15 +154,6 @@ class Pretrainer:
         total_loss += loss_stats['loss']
         total_batches += loss_stats['batches']
 
-        # Phase 2: Inter Loss
-        if epoch % self.configs.inter_loss_interval == 0:
-            inter_loss = self._train_inter_loss(optimizer, epoch)
-            if inter_loss is not None:
-                total_loss += inter_loss
-                total_batches += 1
-        else:
-            self.logger.info(f"Epoch {epoch} | Skip inter loss (interval={self.configs.inter_loss_interval})")
-
         # Log
         self._log_epoch_summary(epoch, start_epoch_time)
         self._update_epoch_time(epoch, start_epoch_time)
@@ -212,10 +203,13 @@ class Pretrainer:
                     start_idx = 0
                 if start_idx >= num_datasets:
                     return {'loss': 0.0, 'batches': 0}
-
-            elif resume_from['step_type'] in ['node', 'graph']:
-                self.logger.info(
-                    f"Resuming from '{resume_from['step_type']}' stage. Skipping all {type_str}-level training.")
+            elif resume_from['step_type'] == 'node' and type_str == 'graph':
+                start_idx = 0
+            elif resume_from['step_type'] == 'graph' and type_str == 'node':
+                self.logger.info("Already passed node-level stage. Skipping node-level training.")
+                return {'loss': 0.0, 'batches': 0}
+            else:
+                self.logger.warning(f"Unknown resume state: step_type={resume_from['step_type']}, current={type_str}")
                 return {'loss': 0.0, 'batches': 0}
 
         if start_idx >= num_datasets:
@@ -304,21 +298,6 @@ class Pretrainer:
             torch.cuda.empty_cache()
 
         return {'loss': total_loss, 'batches': total_batches}
-
-    def _train_inter_loss(self, optimizer, epoch):
-        dataset_names, all_proto_z, _ = self.model.prototype_manager.get_all_prototypes()
-        if all_proto_z is None or len(dataset_names) < 2:
-            return 0.0
-
-        sim = torch.mm(all_proto_z, all_proto_z.t()) / self.configs.prototype_temperature
-        labels = torch.arange(len(dataset_names), device=all_proto_z.device)
-        inter_loss = F.cross_entropy(sim, labels)
-
-        optimizer.zero_grad()
-        inter_loss.backward()
-        optimizer.step()
-
-        return inter_loss.item()
 
     def _log_progress(self, epoch, loader_type, loader_idx, batch_idx, dataset_len, loss, start_loader_time,
                       batches_done):

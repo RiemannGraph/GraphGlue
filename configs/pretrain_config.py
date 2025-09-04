@@ -72,11 +72,11 @@ def get_pretrain_parser():
     parser.add_argument('--nv_num_epochs', type=int, default=100,
                         help='Number of epochs to train Node2Vec (default: 100)')
 
-    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[10, 5],
+    parser.add_argument('--num_neighbors', type=int, nargs='+', default=[10, 8],
                         help='neighbor number of each hop')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size for data loading')
     parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of workers for data loading')
@@ -188,7 +188,10 @@ def parse_pretrain_config() -> PretrainConfig:
         dir_name += f"{d}_"
     for d in config.pretrain_multi_graph_data:
         dir_name += f"{d}_"
+
     config.checkpoint_dir = f"checkpoints/pretrain/{dir_name[:-1]}"
+    config.log_path = f"logs/pretrain/{dir_name[:-1]}.log"
+    args.config_save_path = f"./scripts/pretrain/{dir_name[:-1]}.yaml"
 
     if args.config_save_path:
         save_config_to_yaml(config, args.config_save_path)
