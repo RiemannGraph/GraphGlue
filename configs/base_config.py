@@ -1,4 +1,4 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from argparse import ArgumentParser
 import yaml
@@ -78,8 +78,10 @@ def add_model_config(parser: ArgumentParser):
 
 def save_config_to_yaml(config: ModelConfig, filepath: str):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    exclude_keys = {'resume_checkpoint', 'resume_temp_checkpoint'}
+    filtered_config = {k: v for k, v in config.__dict__.items() if k not in exclude_keys}
     with open(filepath, 'w', encoding='utf-8') as f:
-        yaml.dump(asdict(config), f, default_flow_style=False, indent=2, sort_keys=False)
+        yaml.dump(filtered_config, f, default_flow_style=False, indent=2, sort_keys=False)
     print(f"Config saved to {filepath}")
 
 

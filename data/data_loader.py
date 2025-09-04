@@ -1,7 +1,7 @@
 import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import (
-    AmazonProducts, Reddit, AttributedGraphDataset,
+    Reddit, AttributedGraphDataset,
     Planetoid, Amazon, FacebookPagePage,
     WordNet18RR, TUDataset, MoleculeNet
 )
@@ -99,7 +99,6 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
         dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_split, transform_x]))
-        data = dataset[0]
     elif data_name == 'FB15k_237':
         transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
         transform_x = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
@@ -109,6 +108,7 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
         dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_split, transform_x]))
     else:
         raise ValueError('Invalid data_name')
+    data = dataset[0]
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
     train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val, num_test)
