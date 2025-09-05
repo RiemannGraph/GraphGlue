@@ -51,12 +51,17 @@ def load_pretrain_multi_graph_data(configs, data_name):
     return dataset
 
 
-def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
+def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1):
     root = configs.root
-    transform = T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-                                  num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
+    # transform = T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
+    #                               num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
+    transform = T.Compose([
+        T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
+                          num_train_per_class=k_shot, num_val=num_val),
+        # UnifyFeatureDims(configs.in_dim)
+    ])
     if data_name == "ogbn-arxiv":
-        dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), FlattenLabels(), transform]))
+        dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), transform]))
     elif data_name in ["Cora", "CiteSeers", "PubMed"]:
         dataset = Planetoid(root, data_name, transform=transform)
     elif data_name in ["Computers", "Photo"]:
@@ -76,7 +81,7 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
     return dataset, data
 
 
-def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_val=0.5, num_test=0.5):
+def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_val=0.5):
     """Just for single class classification"""
     root = configs.root
     if data_name in ["PROTEINS", "MUTAG", "ENZYMES"]:
@@ -90,17 +95,17 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
     return dataset, train_mask, val_mask, test_mask
 
 
-def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1, num_test=0.2):
+def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1):
     root = configs.root
     if data_name == "WordNet18RR":
-        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val)
         transform_x = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
         dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_split, transform_x]))
     elif data_name == 'FB15k_237':
-        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val, num_test)
+        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val)
         transform_x = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
@@ -111,7 +116,7 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
     data = dataset[0]
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
-    train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val, num_test)
+    train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val)
     return dataset, data, (train_mask, val_mask, test_mask)
 
 

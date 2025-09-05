@@ -51,17 +51,16 @@ class RenameFromRootedEgoNets(BaseTransform):
 
 
 class FewShotLinkSplit(BaseTransform):
-    def __init__(self, k_shot, num_splits, num_val=0.1, num_test=0.2):
+    def __init__(self, k_shot, num_splits, num_val=0.1):
         super().__init__()
         self.k_shot = k_shot
         self.num_splits = num_splits
         self.num_val = num_val
-        self.num_test = num_test
 
     def forward(self, data):
         train_mask, val_mask, test_mask = link_k_shot_split(data,
                                                             self.k_shot, self.num_splits,
-                                                            self.num_val, self.num_test)
+                                                            self.num_val)
         data.train_mask = train_mask
         data.val_mask = val_mask
         data.test_mask = test_mask

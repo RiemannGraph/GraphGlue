@@ -21,10 +21,8 @@ class RPGPrompt(nn.Module):
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
         self.pretrained_model = pretrained_model
 
-        self.prompt_z = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
-        nn.init.kaiming_normal_(self.prompt_z.data)
-        self.prompt_z_tan = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
-        nn.init.kaiming_normal_(self.prompt_z_tan.data)
+        self.prompt_z = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))
+        self.prompt_z_tan = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))
 
         self.align_coef = configs.align_coef
         num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
@@ -43,7 +41,7 @@ class RPGPrompt(nn.Module):
         graph.x = self.input_lin(graph.x)
         z, z_tan = self.pretrained_model(graph, batch_graph_nums)
         z = z @ self.prompt_z
-        weights = self.gated_func(z)    # [*, K]
+        weights = self.gated_func(z).softmax(-1)    # [*, K]
         _, _, proto_z_tan = self.pretrained_model.get_all_prototypes()
         z_tan_align = torch.einsum('ij,jkl->ikl', weights, proto_z_tan)   # [*, M, d]
         z_tan_adapt = z_tan @ self.prompt_z_tan

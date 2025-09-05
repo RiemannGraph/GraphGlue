@@ -172,7 +172,7 @@ def _graph_few_shot_one_split(dataset, k_shot=5, num_val=0.5) -> tuple[torch.Ten
     return train_mask, val_mask, test_mask
 
 
-def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_test=0.2):
+def link_k_shot_split(data, k_shot, num_splits, num_val=0.1,):
     """
     :return list of (train_data, val_data, test_data) for each split
     """
@@ -212,7 +212,7 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_test=0.2):
                 val_split = torch.empty(0, dtype=torch.long)
                 test_split = torch.empty(0, dtype=torch.long)
             else:
-                val_ratio = num_val / (num_val + num_test)
+                val_ratio = num_val
                 val_size = int(num_remaining * val_ratio)
                 val_split = remaining_indices[:val_size]
                 test_split = remaining_indices[val_size:]

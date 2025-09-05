@@ -33,8 +33,7 @@ class AdaptionConfig(ModelConfig):
     task_types: List[str] = None
     k_shot: int = 5
     num_trials: int = 10
-    num_val: float = 0.5
-    num_test: float = 0.5
+    num_val: float = 0.1
 
     # Training
     align_coef: float = 0.1
@@ -94,15 +93,13 @@ def get_pretrain_parser():
                         help="Number of independent trials.")
     parser.add_argument("--num_val", type=float, default=0.1,
                         help="Proportion of validation set.")
-    parser.add_argument("--num_test", type=float, default=0.2,
-                        help="Proportion of test set.")
 
     # Training
     parser.add_argument("--align_coef", type=float, default=0.1,
                         help="Coefficient for alignment loss.")
     parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size for task training.")
-    parser.add_argument("--lr_task", type=float, default=1e-5,
+    parser.add_argument("--lr_task", type=float, default=1e-4,
                         help="Learning rate for task model.")
     parser.add_argument("--task_weight_decay", type=float, default=0,
                         help="Weight decay for task optimizer.")
@@ -163,7 +160,6 @@ def parse_adaption_config() -> AdaptionConfig:
         k_shot=args.k_shot,
         num_trials=args.num_trials,
         num_val=args.num_val,
-        num_test=args.num_test,
         align_coef=args.align_coef,
         batch_size=args.batch_size,
         lr_task=args.lr_task,
