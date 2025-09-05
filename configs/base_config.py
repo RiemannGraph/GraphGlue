@@ -7,14 +7,13 @@ import os
 
 @dataclass
 class ModelConfig:
-
     pretrain_single_graph_data: List[str] = None
     pretrain_multi_graph_data: List[str] = None
 
     """Shared model architecture configuration"""
 
     n_layers: int = 2
-    num_samples: Optional[int] = 500
+    num_samples: Optional[int] = 100
     in_dim: int = 128
     hid_dim: int = 256
     att_dim: int = 512
@@ -36,11 +35,11 @@ def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                        default=["ogbn-arxiv", "Computers", "Reddit", "FB15k_237"],
-                        help='node-level pretraining datasets')
+                       default=["ogbn-arxiv", "Computers", "FB15k_237"],
+                       help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
-                        default=["PROTEINS", "HIV"],
-                        help='graph-level pretraining datasets')
+                       default=["PROTEINS", "HIV"],
+                       help='graph-level pretraining datasets')
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
     group.add_argument('--num_samples', type=int, default=100,

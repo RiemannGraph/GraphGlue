@@ -5,23 +5,23 @@ from downstream.adapt_trainer import AdaptTrainer
 
 
 def main():
-    config = parse_pretrain_config()
+    # config = parse_pretrain_config()
+    #
+    # print("Final Configuration:")
+    # for k, v in config.__dict__.items():
+    #     print(f"  {k}: {v}")
+
+    # trainer = Pretrainer(config)
+    # trainer.train()
+
+    config = parse_adaption_config()
 
     print("Final Configuration:")
     for k, v in config.__dict__.items():
         print(f"  {k}: {v}")
 
-    trainer = Pretrainer(config)
+    trainer = AdaptTrainer(config)
     trainer.train()
-
-    # config = parse_adaption_config()
-    #
-    # print("Final Configuration:")
-    # for k, v in config.__dict__.items():
-    #     print(f"  {k}: {v}")
-    #
-    # trainer = AdaptTrainer(config)
-    # trainer.train()
 
 
 
