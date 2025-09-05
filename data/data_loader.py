@@ -53,12 +53,10 @@ def load_pretrain_multi_graph_data(configs, data_name):
 
 def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1):
     root = configs.root
-    # transform = T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-    #                               num_train_per_class=k_shot, num_val=num_val, num_test=num_test)
     transform = T.Compose([
+        FlattenLabels(),
         T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-                          num_train_per_class=k_shot, num_val=num_val),
-        # UnifyFeatureDims(configs.in_dim)
+                          num_train_per_class=k_shot, num_val=num_val)
     ])
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), transform]))
