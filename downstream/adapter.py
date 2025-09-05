@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+
+from cores.layers import ActivateModule
 from cores.loss_funcs import PTGBLoss
 from cores.models import RPGraphFM, FeedForwardLayer
 from torch_geometric.data import Data
@@ -26,8 +28,12 @@ class RPGPrompt(nn.Module):
 
         self.align_coef = configs.align_coef
         num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
-        self.gated_func = FeedForwardLayer(configs.hid_dim, configs.hid_dim, num_datasets,
-                                           configs.bias, configs.act_str, configs.drop)
+        self.gated_func = nn.Sequential(
+            nn.Linear(configs.hid_dim, configs.hid_dim, bias=configs.bias),
+            nn.Dropout(configs.drop),
+            ActivateModule(configs.act_str),
+            nn.Linear(configs.hid_dim, num_datasets, bias=configs.bias),
+        )
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.head = ADAPTERS[task_type](configs.hid_dim, num_cls)
 
@@ -47,7 +53,7 @@ class RPGPrompt(nn.Module):
         z_tan_adapt = z_tan @ self.prompt_z_tan
         align_loss =  torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
         ptgb_loss = self.ptg_loss(z_tan_align)
-        return z, z_tan_adapt, (align_loss + ptgb_loss) * self.align_coef
+        return z, z_tan_adapt, align_loss * self.align_coef + ptgb_loss
 
     def predict(self, z: torch.Tensor, graph: Data):
         z = self.head(z, graph)

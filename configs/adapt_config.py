@@ -97,9 +97,9 @@ def get_pretrain_parser():
     # Training
     parser.add_argument("--align_coef", type=float, default=0.1,
                         help="Coefficient for alignment loss.")
-    parser.add_argument("--batch_size", type=int, default=32,
+    parser.add_argument("--batch_size", type=int, default=16,
                         help="Batch size for task training.")
-    parser.add_argument("--lr_task", type=float, default=1e-4,
+    parser.add_argument("--lr_task", type=float, default=1e-3,
                         help="Learning rate for task model.")
     parser.add_argument("--task_weight_decay", type=float, default=0,
                         help="Weight decay for task optimizer.")

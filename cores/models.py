@@ -17,7 +17,7 @@ class PTGB(nn.Module):
         super(PTGB, self).__init__()
         self.num_generators = num_generators
         self.generators = nn.Parameter(torch.empty(num_generators, hid_dim))
-        nn.init.kaiming_normal_(self.generators.data)
+        nn.init.orthogonal_(self.generators.data)
         self.W_q = nn.Linear(hid_dim, att_dim)
         self.W_k = nn.Linear(hid_dim, att_dim)
 
