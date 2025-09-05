@@ -153,7 +153,7 @@ class AdaptTrainer:
         if configs.task_type == "node_cls":
             dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
-                                                           configs.num_val, configs.num_test)
+                                                           configs.num_val)
             num_classes = dataset.num_classes
             num_features = dataset.num_features
             for t in range(configs.num_trials):
@@ -178,7 +178,7 @@ class AdaptTrainer:
         elif configs.task_type == "graph_cls":
             dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
-                                                           configs.num_val, configs.num_test)
+                                                           configs.num_val)
             num_classes = dataset.num_classes
             num_features = dataset.num_features
             for t in range(configs.num_trials):
@@ -189,7 +189,7 @@ class AdaptTrainer:
         elif configs.task_type == "link_cls":
             dataset, data, masks = load_few_shot_link_graph_data(configs, configs.data_name,
                                                                  configs.k_shot, configs.num_trials,
-                                                                 configs.num_val, configs.num_test)
+                                                                 configs.num_val)
             num_classes = len(data.edge_type.unique())
             num_features = data.x.shape[-1]
             train_mask, val_mask, test_mask = masks
