@@ -106,7 +106,7 @@ class AdaptTrainer:
                 if (epoch + 1) % self.configs.eval_interval == 0:
                     val_loss, val_acc = eval_step(self.val_loaders[trial], self.model, self.device,
                                            **AdaptTrainer.TASK_CONFIGS[self.task_type])
-                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc:.4f}')
+                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc * 100:.2f}%')
                     save_checkpoint(
                         model=self.model,
                         optimizer=optimizer,
@@ -133,6 +133,7 @@ class AdaptTrainer:
 
             test_loss, test_acc = eval_step(self.test_loaders[trial], self.model, self.device,
                                             **AdaptTrainer.TASK_CONFIGS[self.task_type])
+            self.logger.info(f'Trial {trial:03d} | Test Acc: {test_acc * 100:.2f}%')
             total_acc.append(test_acc)
         self.logger.info(f'Final Test Acc: {np.mean(total_acc) * 100:.2f} \u00B1 {np.std(total_acc) * 100:.2f} %')
 

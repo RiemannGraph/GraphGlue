@@ -54,15 +54,15 @@ class AdaptionConfig(ModelConfig):
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
-    parser.add_argument("--data_name", type=str, default="PubMed",
+    parser.add_argument("--data_name", type=str, default="Computers",
                         help="Name of the dataset. [PubMed, Computers, FacebookPagePage, WordNet18RR, PROTEINS, HIV] ")
     parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
                         help="file path of pretrained model checkpoint.")
-    parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 10],
+    parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 8],
                         help="List of number of neighbors for each hop (e.g., --num_neighbors [10 10]).")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     # Node2Vec parameters (for KGs without node features)
-    parser.add_argument('--nv_dim', type=int, default=128,
+    parser.add_argument('--nv_dim', type=int, default=64,
                         help='Node2Vec embedding dimension (default: 128)')
     parser.add_argument('--nv_batch_size', type=int, default=128,
                         help='Batch size for Node2Vec training (default: 128)')
@@ -102,9 +102,9 @@ def get_pretrain_parser():
                         help="Coefficient for alignment loss.")
     parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size for task training.")
-    parser.add_argument("--lr_task", type=float, default=1e-3,
+    parser.add_argument("--lr_task", type=float, default=1e-5,
                         help="Learning rate for task model.")
-    parser.add_argument("--task_weight_decay", type=float, default=1e-5,
+    parser.add_argument("--task_weight_decay", type=float, default=0,
                         help="Weight decay for task optimizer.")
     parser.add_argument("--task_epochs", type=int, default=500,
                         help="Number of epochs for task training.")
@@ -114,7 +114,7 @@ def get_pretrain_parser():
                         help="Log every N epochs.")
     parser.add_argument("--resume_checkpoint", action="store_true",
                         help="Whether to resume from checkpoint.")
-    parser.add_argument("--patience", type=int, default=20,
+    parser.add_argument("--patience", type=int, default=10,
                         help="Patience for early stopping.")
 
     # Config IO
@@ -172,7 +172,22 @@ def parse_adaption_config() -> AdaptionConfig:
         max_grad_norm=args.max_grad_norm,
         eval_interval=args.eval_interval,
         resume_checkpoint=args.resume_checkpoint,
-        patience=args.patience
+        patience=args.patience,
+
+        n_layers=args.n_layers,
+        num_samples=args.num_samples,
+        in_dim=args.in_dim,
+        hid_dim=args.hid_dim,
+        att_dim=args.att_dim,
+        num_generators=args.num_generators,
+        bias=args.bias,
+        act_str=args.act_str,
+        drop=args.drop,
+        conv_name=args.conv_name,
+        normalize=args.normalize,
+        norm_str=args.norm_str,
+        temperature=args.temperature,
+        ema_alpha=args.ema_alpha,
     )
 
     if args.config_save_path:

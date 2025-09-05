@@ -16,8 +16,6 @@ class RPGPrompt(nn.Module):
         :param num_cls: classes number
         """
         super(RPGPrompt, self).__init__()
-        assert 'proto_z' in pretrained_model._buffers and 'proto_z_tan' in pretrained_model._buffers, \
-            "the global prototype must be stored in pretraining phase."
         assert task_type in ["node_cls", "graph_cls", "link_cls"], "the task type must be one of [node_cls, graph_cls, link_cls]"
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, self.configs.in_dim)
@@ -46,11 +44,12 @@ class RPGPrompt(nn.Module):
         z, z_tan = self.pretrained_model(graph, batch_graph_nums)
         z = z @ self.prompt_z
         weights = self.gated_func(z)    # [*, K]
-        z_tan_align = torch.einsum('ij,jkl->ikl', weights, self.pretrained_model.proto_z_tan)   # [*, M, d]
+        _, _, proto_z_tan = self.pretrained_model.get_all_prototypes()
+        z_tan_align = torch.einsum('ij,jkl->ikl', weights, proto_z_tan)   # [*, M, d]
         z_tan_adapt = z_tan @ self.prompt_z_tan
-        align_loss = self.align_coef * torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
+        align_loss =  torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
         ptgb_loss = self.ptg_loss(z_tan_align)
-        return z, z_tan_adapt, align_loss + ptgb_loss
+        return z, z_tan_adapt, (align_loss + ptgb_loss) * self.align_coef
 
     def predict(self, z: torch.Tensor, graph: Data):
         z = self.head(z, graph)
