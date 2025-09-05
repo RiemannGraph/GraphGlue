@@ -172,7 +172,7 @@ def _graph_few_shot_one_split(dataset, k_shot=5, num_val=0.5) -> tuple[torch.Ten
     return train_mask, val_mask, test_mask
 
 
-def link_k_shot_split(data, k_shot, num_splits, num_val=0.1,):
+def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
     """
     :return list of (train_data, val_data, test_data) for each split
     """

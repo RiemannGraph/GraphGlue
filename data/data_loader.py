@@ -56,7 +56,8 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
     transform = T.Compose([
         FlattenLabels(),
         T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-                          num_train_per_class=k_shot, num_val=num_val)
+                          num_train_per_class=k_shot, num_val=num_val),
+        UnifyFeatureDims(configs.in_dim)
     ])
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), transform]))

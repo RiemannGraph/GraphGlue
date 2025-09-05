@@ -357,7 +357,7 @@ class Pretrainer:
         data = load_pretrain_single_graph_data(self.configs, data_name)
         node_loader = NeighborLoader(data, batch_size=self.configs.batch_size,
                                      num_neighbors=self.configs.num_neighbors,
-                                     shuffle=False, num_workers=self.configs.num_workers,
+                                     shuffle=True, num_workers=self.configs.num_workers,
                                      transform=Compose([RootedEgoNets(self.configs.k_hops),
                                                         RenameFromRootedEgoNets()]),
                                      persistent_workers=False)
@@ -365,7 +365,7 @@ class Pretrainer:
 
     def _create_graph_loader(self, data_name):
         dataset = load_pretrain_multi_graph_data(self.configs, data_name)
-        graph_loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=False,
+        graph_loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True,
                                   num_workers=self.configs.num_workers, persistent_workers=False)
         return graph_loader
 

@@ -53,10 +53,14 @@ class AdaptionConfig(ModelConfig):
 
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
+
     parser.add_argument("--data_name", type=str, default="Computers",
-                        help="Name of the dataset. [PubMed, Computers, FacebookPagePage, WordNet18RR, PROTEINS, HIV] ")
-    parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain/pretrain_final_model.pth",
+                        help="Name of the dataset. [ogbn-arxiv, Computers, Reddit, FB15k_237, PROTEINS, HIV] ")
+    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_cls"],
+                        help="Type of downstream task.")
+    parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/Computers/temp_pretrain_epoch_0.pth",
                         help="file path of pretrained model checkpoint.")
+
     parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 8],
                         help="List of number of neighbors for each hop (e.g., --num_neighbors [10 10]).")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
@@ -85,8 +89,6 @@ def get_pretrain_parser():
                         help='Number of workers for data loading')
 
     # Task
-    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_pred"],
-                        help="Type of downstream task.")
     parser.add_argument("--k_shot", type=int, default=5,
                         help="Number of shots in few-shot learning.")
     parser.add_argument("--num_trials", type=int, default=10,
@@ -95,9 +97,9 @@ def get_pretrain_parser():
                         help="Proportion of validation set.")
 
     # Training
-    parser.add_argument("--align_coef", type=float, default=0.1,
+    parser.add_argument("--align_coef", type=float, default=0.01,
                         help="Coefficient for alignment loss.")
-    parser.add_argument("--batch_size", type=int, default=16,
+    parser.add_argument("--batch_size", type=int, default=32,
                         help="Batch size for task training.")
     parser.add_argument("--lr_task", type=float, default=1e-3,
                         help="Learning rate for task model.")
@@ -111,7 +113,7 @@ def get_pretrain_parser():
                         help="Log every N epochs.")
     parser.add_argument("--resume_checkpoint", action="store_true",
                         help="Whether to resume from checkpoint.")
-    parser.add_argument("--patience", type=int, default=10,
+    parser.add_argument("--patience", type=int, default=20,
                         help="Patience for early stopping.")
 
     # Config IO
@@ -178,7 +180,7 @@ def parse_adaption_config() -> AdaptionConfig:
         num_generators=args.num_generators,
         bias=args.bias,
         act_str=args.act_str,
-        drop=args.drop,
+        drop=0.5,
         conv_name=args.conv_name,
         normalize=args.normalize,
         norm_str=args.norm_str,

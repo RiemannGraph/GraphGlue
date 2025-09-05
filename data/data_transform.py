@@ -15,12 +15,20 @@ class FlattenLabels(BaseTransform):
 
 
 class UnifyFeatureDims(BaseTransform):
-    def __init__(self, uni_dim: int):
+    def __init__(self, uni_dim: int, mode='random'):
         super().__init__()
+        assert mode in ['random', 'svd'], "mode must be 'random' or 'svd'!"
         self.uni_dim = uni_dim
+        self.mode = mode
 
     def forward(self, data: Data):
-        data.x = unify_feature_dimension(data.x, self.uni_dim)
+        d = data.x.shape[-1]
+        x = data.x
+        if self.mode == 'random':
+            x = (x - x.mean(dim=0, keepdim=True)) / (x.std(dim=0, keepdim=True) + 1e-6)
+            data.x = x @ torch.randn(d, self.uni_dim)
+        else:
+            data.x = unify_feature_dimension(x, self.uni_dim)
         return data
 
 

@@ -84,8 +84,7 @@ class RPGraphFM(nn.Module):
         super().__init__()
         self.num_samples = configs.num_samples
         self.num_generators = configs.num_generators
-        self.input_lin = FeedForwardLayer(configs.in_dim, configs.hid_dim, configs.hid_dim,
-                                          configs.bias, configs.act_str, configs.drop)
+        self.input_lin = nn.Linear(configs.in_dim, configs.hid_dim)
         self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
         self.encoder = PooLedSubgraphGNN(configs.conv_name, configs.n_layers,
                                          configs.hid_dim, configs.hid_dim,

@@ -49,7 +49,6 @@ class AdaptTrainer:
                                pretrained_model, configs.task_type,
                                num_classes
                                ).to(self.device)
-        self.model.pretrained_model.frozen()
 
         self.start_epoch = 0
 
@@ -107,15 +106,15 @@ class AdaptTrainer:
                     val_loss, val_acc = eval_step(self.val_loaders[trial], self.model, self.device,
                                            **AdaptTrainer.TASK_CONFIGS[self.task_type])
                     self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc * 100:.2f}%')
-                    save_checkpoint(
-                        model=self.model,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                        epoch=epoch + 1,
-                        config=self.configs.__dict__,
-                        filepath=os.path.join(self.configs.checkpoint_dir,
-                                              f'downstream_{trial + 1}_epoch_{epoch + 1}.pth')
-                    )
+                    # save_checkpoint(
+                    #     model=self.model,
+                    #     optimizer=optimizer,
+                    #     scheduler=scheduler,
+                    #     epoch=epoch + 1,
+                    #     config=self.configs.__dict__,
+                    #     filepath=os.path.join(self.configs.checkpoint_dir,
+                    #                           f'downstream_{trial + 1}_epoch_{epoch + 1}.pth')
+                    # )
                     if early_stopping.step(
                             metric=val_acc,
                             model=self.model,
