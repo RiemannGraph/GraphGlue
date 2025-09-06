@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import (
@@ -6,12 +6,14 @@ from torch_geometric.datasets import (
     Planetoid, Amazon, FacebookPagePage,
     WordNet18RR, TUDataset, MoleculeNet
 )
+from torch_geometric.loader import NeighborSampler
+
 from data.data_custom import FB15k_237
 from ogb.nodeproppred import PygNodePropPredDataset
 from data.data_transform import FlattenLabels, UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
 from data.data_process import graph_few_shot_splits, link_k_shot_split
-from torch_geometric.data import Dataset, Data, Batch
-from torch_geometric.utils import to_undirected, k_hop_subgraph
+from torch_geometric.data import Dataset, Data
+from torch_geometric.utils import to_undirected, k_hop_subgraph, subgraph
 
 
 def load_pretrain_single_graph_data(configs, data_name: str):
@@ -156,6 +158,7 @@ class Node2GraphDataset(Dataset):
             self,
             data: Data,
             k_hops: int = 2,
+            max_nodes_per_graph=None,
             data_name_map: int = None,
             input_node_idx: torch.Tensor = None,
     ):
@@ -171,6 +174,7 @@ class Node2GraphDataset(Dataset):
         self.k_hops = k_hops
         self.input_node_idx = input_node_idx if input_node_idx is not None else torch.arange(data.num_nodes)
         self.data_name_map = data_name_map
+        self.max_nodes_per_graph = max_nodes_per_graph
 
     @property
     def dataset_type(self):
@@ -187,7 +191,7 @@ class Node2GraphDataset(Dataset):
             self.data.edge_index,
             relabel_nodes=True
         )
-        return Data(
+        data = Data(
             x=self.data.x[subset],
             edge_index=edge_index,
             original_node_ids=subset,
@@ -198,3 +202,24 @@ class Node2GraphDataset(Dataset):
             data_name_map=self.data_name_map,
             data_type="node"
         )
+        if self.max_nodes_per_graph is not None and data.num_nodes > self.max_nodes_per_graph:
+            perm = torch.randperm(data.num_nodes)
+            sampled_nodes = perm[:self.max_nodes_per_graph]
+
+            if mapping not in sampled_nodes:
+                sampled_nodes = torch.cat([sampled_nodes, mapping], dim=0)
+
+            sampled_edge_index, _, edge_mask = subgraph(sampled_nodes, data.edge_index, relabel_nodes=True, return_edge_mask=True)
+            data = Data(
+                x=data.x[sampled_nodes] if data.x is not None else None,
+                edge_index=sampled_edge_index,
+                original_node_ids=subset[sampled_nodes],
+                center_node_idx=-1,
+                edge_weight=data.edge_weight[edge_mask] \
+                    if hasattr(data, 'edge_weight') and data.edge_weight is not None \
+                    else torch.ones_like(sampled_edge_index[0]).float(),
+                data_name_map=self.data_name_map,
+                data_type="node"
+            )
+
+        return data
