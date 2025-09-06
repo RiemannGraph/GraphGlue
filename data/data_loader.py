@@ -189,7 +189,8 @@ class Node2GraphDataset(Dataset):
             target_node,
             self.k_hops,
             self.data.edge_index,
-            relabel_nodes=True
+            relabel_nodes=True,
+            num_nodes=self.data.num_nodes
         )
         data = Data(
             x=self.data.x[subset],
@@ -202,14 +203,20 @@ class Node2GraphDataset(Dataset):
             data_name_map=self.data_name_map,
             data_type="node"
         )
-        if self.max_nodes_per_graph is not None and data.num_nodes > self.max_nodes_per_graph:
-            perm = torch.randperm(data.num_nodes)
+        num_nodes = data.x.shape[0]
+        if self.max_nodes_per_graph is not None and num_nodes > self.max_nodes_per_graph:
+            perm = torch.randperm(num_nodes)
             sampled_nodes = perm[:self.max_nodes_per_graph]
 
             if mapping not in sampled_nodes:
                 sampled_nodes = torch.cat([sampled_nodes, mapping], dim=0)
 
-            sampled_edge_index, _, edge_mask = subgraph(sampled_nodes, data.edge_index, relabel_nodes=True, return_edge_mask=True)
+            sampled_edge_index, _, edge_mask = subgraph(
+                sampled_nodes,
+                data.edge_index,
+                relabel_nodes=True,
+                return_edge_mask=True
+            )
             data = Data(
                 x=data.x[sampled_nodes] if data.x is not None else None,
                 edge_index=sampled_edge_index,
