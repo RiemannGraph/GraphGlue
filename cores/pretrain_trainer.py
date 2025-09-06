@@ -308,7 +308,7 @@ class Pretrainer:
 
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
-            datasets.append(Node2GraphDataset(data, self.configs.k_hops, 300, self.dataset_dict[data_name]))
+            datasets.append(Node2GraphDataset(data, self.configs.k_hops, self.configs.max_node_per_graph, self.dataset_dict[data_name]))
 
         for data_name in self.pretrain_multi_graph_data:
             datasets.append(load_pretrain_multi_graph_data(self.configs, data_name, self.dataset_dict[data_name]))
