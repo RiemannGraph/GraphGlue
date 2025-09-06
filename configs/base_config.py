@@ -7,13 +7,25 @@ import os
 
 @dataclass
 class ModelConfig:
+    """Shared pretraining datasets"""
     pretrain_single_graph_data: List[str] = None
     pretrain_multi_graph_data: List[str] = None
+    root: str = "./datasets"
+    k_hops: int = 2
+    """For Node2Vec, data like KG that without node features"""
+    nv_dim: int = 128
+    nv_batch_size: int = 128
+    nv_walk_length: int = 20
+    nv_context_size: int = 10
+    nv_lr: float = 0.01
+    nv_walks_per_node: int = 10
+    nv_p: float = 1.0
+    nv_q: float = 1.0
+    nv_num_epochs: int = 100
 
     """Shared model architecture configuration"""
 
     n_layers: int = 2
-    num_samples: Optional[int] = 100
     in_dim: int = 128
     hid_dim: int = 256
     att_dim: int = 512
@@ -21,29 +33,57 @@ class ModelConfig:
     bias: bool = True
     act_str: str = "gelu"
     drop: float = 0.1
+
     conv_name: str = "gcn"
     normalize: bool = True
     norm_str: str = "layer_norm"
+
     temperature: float = 1.0
     ema_alpha: float = 0.99
+    geo_regular_coef: float = 0.1
 
-    regular_coef_pt: float = 0.5
-    regular_coef_curv: float = .5
+    knn: int = 10
+
+    """Shared Loader"""
+    num_workers: int = 2
 
 
 def add_model_config(parser: ArgumentParser):
     """Add shared model architecture arguments"""
     group = parser.add_argument_group("Model Architecture")
+    parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
                        default=["ogbn-arxiv", "Computers", "FB15k_237"],
                        help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
                        default=["PROTEINS", "HIV"],
                        help='graph-level pretraining datasets')
+    parser.add_argument('--k_hops', type=int, default=2,
+                        help='subgraph sample hops <= len(num_neighbors)')
+
+    # Node2Vec parameters (for KGs without node features)
+    parser.add_argument('--nv_dim', type=int, default=64,
+                        help='dimension of node2vec embedding')
+    parser.add_argument('--nv_batch_size', type=int, default=128,
+                        help='Batch size for Node2Vec training (default: 128)')
+    parser.add_argument('--nv_walk_length', type=int, default=20,
+                        help='Length of random walks in Node2Vec (default: 20)')
+    parser.add_argument('--nv_context_size', type=int, default=10,
+                        help='Context size for context-target prediction (default: 10)')
+    parser.add_argument('--nv_lr', type=float, default=0.01,
+                        help='Learning rate for Node2Vec optimizer (default: 0.01)')
+    parser.add_argument('--nv_walks_per_node', type=int, default=10,
+                        help='Number of random walks per node (default: 10)')
+    parser.add_argument('--nv_p', type=float, default=1.0,
+                        help='Return parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_q', type=float, default=1.0,
+                        help='In-out parameter in Node2Vec (default: 1.0)')
+    parser.add_argument('--nv_num_epochs', type=int, default=100,
+                        help='Number of epochs to train Node2Vec (default: 100)')
+
+    # model configurations
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
-    group.add_argument('--num_samples', type=int, default=100,
-                       help='Number of adjacent edge samples')
     group.add_argument('--in_dim', type=int, default=64,
                        help='Input feature dimension')
     group.add_argument('--hid_dim', type=int, default=256,
@@ -66,12 +106,16 @@ def add_model_config(parser: ArgumentParser):
                        help="Normalization type")
     group.add_argument('--temperature', type=float, default=1.0,
                        help='Temperature')
-    parser.add_argument('--ema_alpha', type=float, default=0.99,
+    group.add_argument('--ema_alpha', type=float, default=0.99,
                         help='Exponential moving average coefficient')
-    group.add_argument('--regular_coef_pt', type=float, default=0.5,
+    group.add_argument('--geo_regular_coef', type=float, default=0.1,
                        help='Regularization coefficient of PT')
-    group.add_argument('--regular_coef_curv', type=float, default=0.5,
-                       help='Regularization coefficient of Curvature')
+
+    parser.add_argument('--knn', type=int, default=10,
+                        help='KNN graph connections for inter-graph loss')
+
+    parser.add_argument('--num_workers', type=int, default=2,
+                        help='Number of workers for data loading')
     return parser
 
 

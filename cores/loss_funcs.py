@@ -43,10 +43,9 @@ class ContrastiveLoss(nn.Module):
 
 
 class GeometricPersistLoss(nn.Module):
-    def __init__(self, regular_coef_pt: int, regular_coef_curv: int):
+    def __init__(self, geo_regular_coef: float):
         super(GeometricPersistLoss, self).__init__()
-        self.regular_coef_pt = regular_coef_pt
-        self.regular_coef_curv = regular_coef_curv
+        self.geo_regular_coef = geo_regular_coef
 
     def forward(self, pt_matrix, log_r_matrix):
         """
@@ -55,8 +54,7 @@ class GeometricPersistLoss(nn.Module):
         :param log_r_matrix: Log Volume Ratio matrix with shape [2, T]
         :return: geometric persistent loss
         """
-        pt_loss = torch.frobenius_norm(pt_matrix[1] @ pt_matrix[0] - pt_matrix[2], dim=[1, 2])
-        pt_loss = self.regular_coef_pt * torch.mean(pt_loss)
-        curv_loss = self.regular_coef_curv * torch.mean((log_r_matrix[0] - log_r_matrix[1]) ** 2)
-        return pt_loss + curv_loss
+        pt_loss = torch.frobenius_norm(pt_matrix[1] @ pt_matrix[0] - pt_matrix[2], dim=[1, 2]).mean()
+        curv_loss = torch.mean((log_r_matrix[0] - log_r_matrix[1]) ** 2)
+        return self.geo_regular_coef * (pt_loss + curv_loss)
 

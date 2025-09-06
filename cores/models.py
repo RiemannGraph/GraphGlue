@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
-from torch_geometric.data import Data
+from torch_geometric.data import Data, Batch
+from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
-from data.data_process import search_adjacent_edges
 from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
 
@@ -18,36 +18,34 @@ class PTGB(nn.Module):
         self.num_generators = num_generators
         self.generators = nn.Parameter(torch.empty(num_generators, hid_dim))
         nn.init.orthogonal_(self.generators.data)
-        self.W_q = nn.Linear(hid_dim, att_dim)
-        self.W_k = nn.Linear(hid_dim, att_dim)
+        self.att_proj = nn.Linear(hid_dim, att_dim)
 
-    def forward(self, x, edge_index, edge_weight, batch, batch_graph_nums):
+    def forward(self, x, edge_index, edge_weight, batch, batch_size):
         """
 
         :param x: [N, d]
         :param edge_index: [2, E]
         :param edge_weight: [E,]
         :param batch: [N]
-        :param batch_graph_nums: If graph-batch, batch_nums=batch_size.
-                                If neighbor-batch, batch_nums=node_nums of sampled graph.
+        :param batch_size: mini-batch size
 
         :return: List[Data]
         """
         N = x.shape[0]
 
-        weights = torch.sigmoid(self.W_q(self.generators) @ self.W_k(x).t())  # [M, N]
+        weights = torch.sigmoid(self.att_proj(self.generators) @ self.att_proj(x).t())  # [M, N]
 
-        add_batch = torch.arange(batch_graph_nums, device=x.device)
+        add_batch = torch.arange(batch_size, device=x.device)
         new_batch = torch.concat([batch, add_batch], dim=0)
 
         counts = torch.bincount(batch)
-        add_edge_src = torch.arange(N, N + batch_graph_nums, device=x.device).repeat_interleave(counts)
+        add_edge_src = torch.arange(N, N + batch_size, device=x.device).repeat_interleave(counts)
         add_edge_dst = torch.arange(N, device=x.device)
         add_edge_index = torch.stack([add_edge_src, add_edge_dst], dim=0)
         new_edge_index = torch.concat([edge_index, add_edge_index], dim=-1)
         aug_graphs = []
         for i in range(self.num_generators):
-            xp = torch.concat([x, self.generators[i: i + 1].repeat(batch_graph_nums, 1)], dim=0)
+            xp = torch.concat([x, self.generators[i: i + 1].repeat(batch_size, 1)], dim=0)
             new_edge_weight = torch.concat([edge_weight, weights[i]], dim=-1)
             aug_graph = Data(x=xp, edge_index=new_edge_index, edge_weight=new_edge_weight, batch=new_batch)
             aug_graphs.append(aug_graph)
@@ -82,7 +80,6 @@ class PooLedSubgraphGNN(nn.Module):
 class RPGraphFM(nn.Module):
     def __init__(self, configs):
         super().__init__()
-        self.num_samples = configs.num_samples
         self.num_generators = configs.num_generators
         self.input_lin = nn.Linear(configs.in_dim, configs.hid_dim)
         self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
@@ -90,32 +87,26 @@ class RPGraphFM(nn.Module):
                                          configs.hid_dim, configs.hid_dim,
                                          configs.normalize, configs.bias,
                                          configs.norm_str, configs.act_str, configs.drop)
-        self.prototype_manager = RiemannianPrototypeManager(configs.hid_dim, configs.num_generators,
+        datasets_list = configs.pretrain_single_graph_data + configs.pretrain_multi_graph_data
+        self.prototype_manager = RiemannianPrototypeManager(datasets_list, configs.hid_dim, configs.num_generators,
                                                             configs.ema_alpha, configs.temperature)
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
-        self.geo_loss = GeometricPersistLoss(configs.regular_coef_pt, configs.regular_coef_curv)
+        self.geo_loss = GeometricPersistLoss(configs.geo_regular_coef)
 
-    def forward(self, graph: Data, batch_graph_nums: int = None):
+    def forward(self, graph: Data):
         """
 
         :param graph: 1) Feature dimension is unified. 2) BatchData
-        :param batch_graph_nums: If graph-batch, batch_nums=batch_size.
-                                If neighbor-batch, batch_nums=node_nums of sampled subgraph.
 
         :return: node/graph embedding, tangent vectors [torch.Tensor, torch.Tensor] with shape [N, d] [N, M, d]
         """
-        if batch_graph_nums is None:
-            if hasattr(graph, "batch_graph_nums"):
-                batch_graph_nums = graph.batch_graph_nums
-            else:
-                batch_graph_nums = graph.batch_size
 
         x, edge_index, edge_weight, batch = graph.x, graph.edge_index, graph.edge_weight, graph.batch
         x = self.input_lin(x)
         z = self.encoder(x, edge_index, edge_weight, batch)
 
-        aug_graphs = self.ptg_bank(x, graph.edge_index, graph.edge_weight, graph.batch, batch_graph_nums)
+        aug_graphs = self.ptg_bank(x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_size)
         z_aug = []
         for aug_graph in aug_graphs:
             tan = self.encoder(aug_graph.x, aug_graph.edge_index, aug_graph.edge_weight, aug_graph.batch)
@@ -124,19 +115,21 @@ class RPGraphFM(nn.Module):
         z_tan = z_aug - z.unsqueeze(1)
         return z, z_tan
 
-    def loss(self, z, z_tan, edge_index, batch_size: Optional[int] = None):
+    def local_struct_loss(self, z, z_tan):
+        ptg_loss = self.ptg_loss(z_tan)
+        cl_loss = self.contra_loss(z, z.unsqueeze(1) + z_tan)
+        return ptg_loss + cl_loss
+
+    def refine_struct_loss(self, z_tan, triple_paths):
         """
 
-        :param z: [N, d]
         :param z_tan: [N, M, d]
-        :param edge_index: [2, E]
-        :param batch_size: If not None, meaning that we only consider center nodes in contrastive loss
+        :param triple_paths: [3, num_paths]
 
         :return: loss for each graph batch or all datasets
         """
-        triple = search_adjacent_edges(edge_index, self.num_samples)
-        if len(triple):
-            vi, vj, vk = triple[0], triple[1], triple[2]
+        if len(triple_paths):
+            vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
             z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
             pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
             pt_matrix_jk = self.parallel_translation(z_tan_j, z_tan_k)
@@ -151,13 +144,7 @@ class RPGraphFM(nn.Module):
         else:
             geo_loss = 0
 
-        if batch_size is not None:
-            z = z[:batch_size]
-            z_tan = z_tan[:batch_size]
-        ptg_loss = self.ptg_loss(z_tan)
-        cl_loss = self.contra_loss(z, z.unsqueeze(1) + z_tan)
-
-        return ptg_loss + cl_loss + geo_loss
+        return geo_loss
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
         proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')
@@ -189,16 +176,16 @@ class RPGraphFM(nn.Module):
         self.prototype_manager.rebuild_cache_from_buffers()
 
     @torch.no_grad()
-    def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
-        z_mean = z_mean.detach()
-        z_tan_mean = z_tan_mean.detach()
-        self.prototype_manager.update_prototype(dataset_name, z_mean, z_tan_mean)
+    def update_prototype(self, z: torch.Tensor, z_tan: torch.Tensor, data_name_map: torch.Tensor):
+        z = z.detach()
+        z_tan = z_tan.detach()
+        self.prototype_manager.update_prototype(z, z_tan, data_name_map)
 
     def get_all_prototypes(self):
         return self.prototype_manager.get_all_prototypes()
 
-    def prototype_loss(self, dataset_name: str, z: torch.Tensor):
-        return self.prototype_manager.loss(dataset_name, z)
+    def prototype_loss(self, z: torch.Tensor, data_name_map: torch.Tensor):
+        return self.prototype_manager.loss(z, data_name_map)
 
     def frozen(self):
         for param in self.parameters():
@@ -267,8 +254,9 @@ class RiemannianPrototypeManager(nn.Module):
     Manages per-dataset prototypes (z and z_tan) with EMA updates.
     Supports contrastive loss between node embeddings and prototypes.
     """
-    def __init__(self, hid_dim: int, num_generators: int, ema_alpha: float = 0.99, temperature: float = 1.0):
+    def __init__(self, datasets_list: List[str], hid_dim: int, num_generators: int, ema_alpha: float = 0.99, temperature: float = 1.0):
         super().__init__()
+        self.datasets_list = datasets_list
         self.hid_dim = hid_dim
         self.num_generators = num_generators
         self.ema_alpha = ema_alpha
@@ -283,20 +271,24 @@ class RiemannianPrototypeManager(nn.Module):
         self._sanitized_to_original: Dict[str, str] = {}
 
     @torch.no_grad()
-    def update_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+    def update_prototype(self, z: torch.Tensor, z_tan: torch.Tensor, data_name_map: torch.Tensor):
         """
         Update or initialize prototype for a dataset using EMA.
         """
-        if dataset_name not in self._proto_z_dict:
-            self._register_new_prototype(dataset_name, z_mean, z_tan_mean)
-        else:
-            alpha = self.ema_alpha
-            proto_z = self._proto_z_dict[dataset_name]
-            proto_z_tan = self._proto_z_tan_dict[dataset_name]
+        dataset_idx = torch.unique(data_name_map).cpu().numpy()
+        z_mean = scatter_mean(z, data_name_map, dim=0)
+        z_tan_mean = scatter_mean(z_tan, data_name_map, dim=0)
+        for i, dataset_name in enumerate([self.datasets_list[idx] for idx in dataset_idx]):
+            if dataset_name not in self._proto_z_dict:
+                self._register_new_prototype(dataset_name, z_mean, z_tan_mean)
+            else:
+                alpha = self.ema_alpha
+                proto_z = self._proto_z_dict[dataset_name]
+                proto_z_tan = self._proto_z_tan_dict[dataset_name]
 
-            # In-place EMA update
-            proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean)
-            proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean)
+                # In-place EMA update
+                proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean[i: i+1])
+                proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean[i: i+1])
 
     def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
         """
@@ -336,33 +328,22 @@ class RiemannianPrototypeManager(nn.Module):
         Returns:
             (names, all_z: [N, d], all_z_tan: [N, d])
         """
-        names = self.prototype_keys
-        if not names:
-            return names, None, None
-
+        names = [name for name in self.datasets_list if name in self.prototype_keys]
         all_z = torch.stack([self._proto_z_dict[name] for name in names], dim=0)
         all_z_tan = torch.stack([self._proto_z_tan_dict[name] for name in names], dim=0)
         return names, all_z, all_z_tan
 
-    def loss(self, dataset_name: str, z: torch.Tensor) -> torch.Tensor:
+    def loss(self, z: torch.Tensor, data_name_map: torch.Tensor) -> torch.Tensor:
         """
         Compute contrastive loss between node embeddings and all prototypes.
         """
         names, all_proto_z, _ = self.get_all_prototypes()
-        if all_proto_z is None or dataset_name not in names:
-            return z.new_zeros((), requires_grad=False)  # scalar on same device
 
-        # Ensure prototype is on same device
         all_proto_z = all_proto_z.to(z.device)
-
-        # Similarity: [N_nodes, N_prototypes]
         sim = torch.mm(z, all_proto_z.t()) / self.temperature
 
-        # Label: index of current dataset
-        label_idx = names.index(dataset_name)
-        labels = torch.full((z.shape[0],), label_idx, dtype=torch.long, device=z.device)
-
-        return F.cross_entropy(sim, labels)
+        loss = F.cross_entropy(sim, data_name_map)
+        return loss
 
     @torch.no_grad()
     def rebuild_cache_from_buffers(self):
@@ -402,5 +383,5 @@ class RiemannianPrototypeManager(nn.Module):
                     self._sanitized_to_original[safe_name] = original_name
 
     def extra_repr(self) -> str:
-        return (f"hid_dim={self.hid_dim}, num_datasets={len(self.prototype_keys)}, "
+        return (f"datasets_list={self.datasets_list}, hid_dim={self.hid_dim}, num_generators={self.num_generators}, "
                 f"ema_alpha={self.ema_alpha}, temperature={self.temperature}")

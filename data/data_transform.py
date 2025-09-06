@@ -23,7 +23,7 @@ class UnifyFeatureDims(BaseTransform):
 
     def forward(self, data: Data):
         d = data.x.shape[-1]
-        x = data.x
+        x = data.x.float()
         if self.mode == 'random':
             x = (x - x.mean(dim=0, keepdim=True)) / (x.std(dim=0, keepdim=True) + 1e-6)
             data.x = x @ torch.randn(d, self.uni_dim)

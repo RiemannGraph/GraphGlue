@@ -3,12 +3,15 @@ import torch
 from torch_geometric.utils import degree, to_undirected, is_undirected
 
 
-def search_adjacent_edges(edge_index, num_samples=None):
+def search_adjacent_edges(edge_index, num_path_samples: int = None, path_sample_times: int = 1):
     """
     :param edge_index: [2, E]
-    :param num_samples: If None, return all paths. Else, return given number of paths.
-    :return paths: torch.Tensor (i, j) (j, k) [N, 3]
+    :param num_path_samples: If None, return all paths. Else, return given number of paths.
+    :param path_sample_times: sampling times, at least 1.
+
+    :return paths: torch.Tensor (i, j) (j, k) [path_sample_times, N, 3]
     """
+    assert path_sample_times >= 1, "sampling times must be greater than 1"
     if not is_undirected(edge_index):
         edge_index = to_undirected(edge_index)
     device = edge_index.device
@@ -47,17 +50,30 @@ def search_adjacent_edges(edge_index, num_samples=None):
     ], dim=1)
     paths = paths[paths[:, 0] != paths[:, 2]]
 
-    if num_samples is not None and num_samples < paths.shape[0]:
-        node_degree = degree(edge_index[0])
-        j_deg = node_degree[paths[:, 1]]
-        i_deg = node_degree[paths[:, 0]]
-        k_deg = node_degree[paths[:, 2]]
-        scores = (i_deg + j_deg + k_deg)
-        prob = scores / scores.sum()
-        sampled_idx = torch.multinomial(prob, num_samples, replacement=False)
-        paths = paths[sampled_idx]
+    if num_path_samples is None:
+        return paths.t().contiguous()
 
-    return paths.t().contiguous()
+    if paths.shape[0] == 0:
+        return torch.empty((path_sample_times, 3, 0), dtype=torch.long, device=device)
+
+    node_degree = degree(edge_index[0])
+    j_deg = node_degree[paths[:, 1]]
+    i_deg = node_degree[paths[:, 0]]
+    k_deg = node_degree[paths[:, 2]]
+    scores = (i_deg + j_deg + k_deg)
+    prob = scores / scores.sum()
+
+    if path_sample_times == 1:
+        sampled_idx = torch.multinomial(prob, num_path_samples, replacement=False)
+        sampled_paths = paths[sampled_idx].t().contiguous().unsqueeze(0)  # [1, 3, num_path_samples]
+    else:
+        sampled_paths_list = []
+        for _ in range(path_sample_times):
+            sampled_idx = torch.multinomial(prob, num_path_samples, replacement=False)
+            sampled_paths_list.append(paths[sampled_idx].t().contiguous())
+        sampled_paths = torch.stack(sampled_paths_list, dim=0)  # [num_trials, 3, num_path_samples]
+
+    return sampled_paths
 
 
 def unify_feature_dimension(

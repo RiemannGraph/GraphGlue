@@ -10,23 +10,6 @@ class AdaptionConfig(ModelConfig):
     # Data
     data_name: str = "PubMed"
     pretrained_checkpoint: str = "checkpoints/pretrain/pretrain_final_model.pth"
-    num_neighbors: List[int] = None
-    root: str = "./datasets"
-
-    k_hops: int = 2
-    # For Node2Vec, data like KG that without node features
-    nv_dim: int = 128
-    nv_batch_size: int = 128
-    nv_walk_length: int = 20
-    nv_context_size: int = 10
-    nv_lr: float = 0.01
-    nv_walks_per_node: int = 10
-    nv_p: float = 1.0
-    nv_q: float = 1.0
-    nv_num_epochs: int = 100
-
-
-    num_workers: int = 2
 
     # Task
     task_type: str = "node_cls"
@@ -60,33 +43,6 @@ def get_pretrain_parser():
                         help="Type of downstream task.")
     parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/Computers/temp_pretrain_epoch_0.pth",
                         help="file path of pretrained model checkpoint.")
-
-    parser.add_argument("--num_neighbors", type=int, nargs="+", default=[10, 8],
-                        help="List of number of neighbors for each hop (e.g., --num_neighbors [10 10]).")
-    parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
-    # Node2Vec parameters (for KGs without node features)
-    parser.add_argument('--nv_dim', type=int, default=64,
-                        help='Node2Vec embedding dimension (default: 128)')
-    parser.add_argument('--nv_batch_size', type=int, default=128,
-                        help='Batch size for Node2Vec training (default: 128)')
-    parser.add_argument('--nv_walk_length', type=int, default=20,
-                        help='Length of random walks in Node2Vec (default: 20)')
-    parser.add_argument('--nv_context_size', type=int, default=10,
-                        help='Context size for context-target prediction (default: 10)')
-    parser.add_argument('--nv_lr', type=float, default=0.01,
-                        help='Learning rate for Node2Vec optimizer (default: 0.01)')
-    parser.add_argument('--nv_walks_per_node', type=int, default=10,
-                        help='Number of random walks per node (default: 10)')
-    parser.add_argument('--nv_p', type=float, default=1.0,
-                        help='Return parameter in Node2Vec (default: 1.0)')
-    parser.add_argument('--nv_q', type=float, default=1.0,
-                        help='In-out parameter in Node2Vec (default: 1.0)')
-    parser.add_argument('--nv_num_epochs', type=int, default=100,
-                        help='Number of epochs to train Node2Vec (default: 100)')
-    parser.add_argument("--k_hops", type=int, default=2,
-                        help="Number of hops for subgraph extraction.")
-    parser.add_argument('--num_workers', type=int, default=0,
-                        help='Number of workers for data loading')
 
     # Task
     parser.add_argument("--k_shot", type=int, default=5,
@@ -141,13 +97,10 @@ def parse_adaption_config() -> AdaptionConfig:
                     setattr(args, key, value)
 
     config = AdaptionConfig(
+        k_hops=args.k_hops,
+        root=args.root,
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,
-        data_name=args.data_name,
-        pretrained_checkpoint=args.pretrained_checkpoint,
-        num_neighbors=args.num_neighbors,
-        root=args.root,
-
         nv_dim=args.nv_dim,
         nv_batch_size=args.nv_batch_size,
         nv_walk_length=args.nv_walk_length,
@@ -157,7 +110,25 @@ def parse_adaption_config() -> AdaptionConfig:
         nv_p=args.nv_p,
         nv_q=args.nv_q,
         nv_num_epochs=args.nv_num_epochs,
+        num_workers=args.num_workers,
+        n_layers=args.n_layers,
+        in_dim=args.in_dim,
+        hid_dim=args.hid_dim,
+        att_dim=args.att_dim,
+        bias=args.bias,
+        act_str=args.act_str,
+        drop=args.drop,
+        conv_name=args.conv_name,
+        normalize=args.normalize,
+        norm_str=args.norm_str,
+        temperature=args.temperature,
+        ema_alpha=args.ema_alpha,
+        knn=args.knn,
+        geo_regular_coef=args.geo_regular_coef,
 
+
+        data_name=args.data_name,
+        pretrained_checkpoint=args.pretrained_checkpoint,
         task_type=args.task_type,
         k_shot=args.k_shot,
         num_trials=args.num_trials,
@@ -170,22 +141,7 @@ def parse_adaption_config() -> AdaptionConfig:
         max_grad_norm=args.max_grad_norm,
         eval_interval=args.eval_interval,
         resume_checkpoint=args.resume_checkpoint,
-        patience=args.patience,
-
-        n_layers=args.n_layers,
-        num_samples=args.num_samples,
-        in_dim=args.in_dim,
-        hid_dim=args.hid_dim,
-        att_dim=args.att_dim,
-        num_generators=args.num_generators,
-        bias=args.bias,
-        act_str=args.act_str,
-        drop=0.5,
-        conv_name=args.conv_name,
-        normalize=args.normalize,
-        norm_str=args.norm_str,
-        temperature=args.temperature,
-        ema_alpha=args.ema_alpha,
+        patience=args.patience
     )
 
     if args.config_save_path:

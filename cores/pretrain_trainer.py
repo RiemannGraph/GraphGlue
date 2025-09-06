@@ -1,9 +1,13 @@
 import torch
 import torch.nn.functional as F
-from torch_geometric.loader import DataLoader, NeighborLoader
-from torch_geometric.transforms import RootedEgoNets, Compose
+from torch_geometric.loader import DataLoader
+from torch.utils.data import ConcatDataset
 from cores.models import RPGraphFM
-from data.data_loader import load_pretrain_single_graph_data, load_pretrain_multi_graph_data
+from data import (
+    load_pretrain_single_graph_data,
+    load_pretrain_multi_graph_data,
+    Node2GraphDataset,
+    search_adjacent_edges)
 from utils.logger import create_logger
 from utils.checkpoints import (
     save_checkpoint,
@@ -11,7 +15,6 @@ from utils.checkpoints import (
     get_latest_checkpoint,
     cleanup_old_checkpoints)
 import os
-from data.data_transform import RenameFromRootedEgoNets
 from utils.tools import format_time
 import time
 import gc
@@ -23,10 +26,10 @@ warnings.filterwarnings("ignore")
 class Pretrainer:
     def __init__(self, configs, logger=None):
         self.final_model_path = None
-        assert len(configs.num_neighbors) == configs.k_hops, "number of neighbor hops are not match!"
         self.configs = configs
         self.pretrain_single_graph_data = configs.pretrain_single_graph_data
         self.pretrain_multi_graph_data = configs.pretrain_multi_graph_data
+        self.dataset_dict = {k: v for v, k in enumerate(self.pretrain_single_graph_data + self.pretrain_multi_graph_data)}
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = RPGraphFM(configs).to(self.device)
         self.logger = create_logger(configs.log_path) if logger is None else logger
@@ -35,9 +38,6 @@ class Pretrainer:
         self.epoch_times = []
 
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
-
-        self.tmp_checkpoint_dir = os.path.join(self.configs.checkpoint_dir, 'tmp')
-        os.makedirs(self.tmp_checkpoint_dir, exist_ok=True)
 
     def train(self):
         optimizer = torch.optim.Adam(
@@ -52,31 +52,11 @@ class Pretrainer:
             eta_min=self.configs.lr_pretrain * 0.01
         )
 
-        # Resume checkpoint if you want
-        resume_from = None
-        if self.configs.resume_checkpoint and self.configs.resume_temp_checkpoint:
-            raise ValueError("Conflicting resume settings...")
-
         if self.configs.resume_checkpoint:
             latest_check_path = get_latest_checkpoint(self.configs.checkpoint_dir)
             if latest_check_path:
                 self.start_epoch = load_checkpoint(latest_check_path, self.model, optimizer, scheduler)
                 self.logger.info(f"Resumed from main checkpoint at epoch {self.start_epoch}")
-            else:
-                self.start_epoch = 0
-
-        elif self.configs.resume_temp_checkpoint:
-            latest_temp_path = get_latest_checkpoint(self.tmp_checkpoint_dir)
-            if latest_temp_path:
-                self.start_epoch, temp_config = load_checkpoint(
-                    filepath=latest_temp_path,
-                    model=self.model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    return_config=True
-                )
-                resume_from = temp_config.get('resume_from')
-                self.logger.info(f"Resumed from temp checkpoint at epoch {self.start_epoch}, step: {resume_from}")
             else:
                 self.start_epoch = 0
         else:
@@ -85,11 +65,7 @@ class Pretrainer:
         for epoch in range(self.start_epoch, self.configs.pretrain_epochs):
             epoch_start_time = time.time()
 
-            train_loss = self._train_epoch(optimizer, scheduler, epoch, resume_from=resume_from)
-
-            if epoch == self.start_epoch:
-                resume_from = None
-                self.logger.info("Resume flag cleared after first epoch.")
+            train_loss = self._train_epoch(optimizer, epoch)
 
             scheduler.step()
 
@@ -134,9 +110,7 @@ class Pretrainer:
                 self.logger.info(f'Saved final model: {final_model_path}')
                 self.final_model_path = final_model_path
 
-            cleanup_old_checkpoints(self.tmp_checkpoint_dir, keep_last=3)
-
-    def _train_epoch(self, optimizer, scheduler, epoch, resume_from=None):
+    def _train_epoch(self, optimizer, epoch):
         if self.start_time is None:
             self.start_time = time.time()
         start_epoch_time = time.time()
@@ -145,161 +119,139 @@ class Pretrainer:
         total_loss = 0.0
         total_batches = 0
 
-        # Phase 1: Intra Training
-        loss_stats = self._train_node_level(optimizer, scheduler, epoch, resume_from)
-        total_loss += loss_stats['loss']
-        total_batches += loss_stats['batches']
+        # ===== Mix training for locality =====
+        loader = self._get_mix_loader()
+        loader_start_time = time.time()
+        for batch_idx, data in enumerate(loader):
+            optimizer.zero_grad()
+            data = data.to(self.device)
+            z, z_tan = self.model(data)
+            local_loss = self.model.local_struct_loss(z, z_tan)
 
-        loss_stats = self._train_graph_level(optimizer, scheduler, epoch, resume_from)
-        total_loss += loss_stats['loss']
-        total_batches += loss_stats['batches']
+            if epoch >= self.configs.warmup_epochs and epoch >= 1:
+                proto_loss = self.model.prototype_loss(z, data.data_name_map)
+                local_loss += proto_loss
+
+            local_loss.backward()
+            optimizer.step()
+            self.model.update_prototype(z.detach(), z_tan.detach(), data.data_name_map)
+
+            total_loss += local_loss.item()
+            total_batches += 1
+
+            if (batch_idx + 1) % self.configs.log_interval == 0:
+                self._log_progress(
+                    epoch=epoch,
+                    batch_idx=batch_idx + 1,
+                    dataset_len=len(loader),
+                    loss=local_loss.item(),
+                    start_loader_time=loader_start_time,
+                    batches_done=batch_idx + 1
+                )
+
+            del data, z, z_tan
+            # gc.collect()
+
+        # ===== Mix training for global distribution =====
+        loader_start_time = time.time()
+        for batch_idx, data in enumerate(loader):
+            optimizer.zero_grad()
+            data = data.to(self.device)
+            z, z_tan = self.model(data)
+            knn_edge_index, _ = self.model.knn_graph(z, self.configs.top_k)
+            triple_paths = search_adjacent_edges(data.edge_index)
+            geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
+            geo_loss.backward()
+            optimizer.step()
+
+            total_loss += geo_loss.item()
+            total_batches += 1
+
+            if (batch_idx + 1) % self.configs.log_interval == 0:
+                self._log_progress(
+                    epoch=epoch,
+                    batch_idx=batch_idx + 1,
+                    dataset_len=len(loader),
+                    loss=geo_loss.item(),
+                    start_loader_time=loader_start_time,
+                    batches_done=batch_idx + 1
+                )
+
+            del data, z, z_tan
+            # gc.collect()
+
+        # ===== Refine manifold structure from locality =====
+        for data_name in self.pretrain_single_graph_data:
+            data = load_pretrain_single_graph_data(self.configs, data_name)
+            triple_paths = search_adjacent_edges(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times)
+            for t in range(self.configs.path_sample_times):
+                input_node_idx = torch.unique(triple_paths[t][1])
+                dataset = Node2GraphDataset(data, self.configs.k_hops, self.dataset_dict[data_name], input_node_idx)
+                loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True, num_workers=self.configs.num_workers)
+                loader_start_time = time.time()
+                for batch_idx, data in enumerate(loader):
+                    optimizer.zero_grad()
+                    data = data.to(self.device)
+                    z, z_tan = self.model(data)
+                    geo_loss = self.model.refine_struct_loss(z_tan, triple_paths[t])
+                    geo_loss.backward()
+                    optimizer.step()
+
+                    total_loss += geo_loss.item()
+                    total_batches += 1
+
+                    if (batch_idx + 1) % self.configs.log_interval == 0:
+                        self._log_progress(
+                            epoch=epoch,
+                            batch_idx=batch_idx + 1,
+                            dataset_len=len(loader),
+                            loss=geo_loss.item(),
+                            start_loader_time=loader_start_time,
+                            batches_done=batch_idx + 1
+                        )
+
+                    del data, z, z_tan
+                del loader, dataset
+                # gc.collect()
+
+        for data_name in self.pretrain_multi_graph_data:
+            dataset = load_pretrain_multi_graph_data(self.configs, data_name, self.dataset_dict[data_name])
+            loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True, num_workers=self.configs.num_workers)
+            loader_start_time = time.time()
+            for batch_idx, data in enumerate(loader):
+                optimizer.zero_grad()
+                data = data.to(self.device)
+                z, z_tan = self.model(data)
+                knn_edge_index, _ = self.model.knn_graph(z, self.configs.top_k)
+                triple_paths = search_adjacent_edges(data.edge_index)
+                geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
+                geo_loss.backward()
+                optimizer.step()
+
+                total_loss += geo_loss.item()
+                total_batches += 1
+
+                if (batch_idx + 1) % self.configs.log_interval == 0:
+                    self._log_progress(
+                        epoch=epoch,
+                        batch_idx=batch_idx + 1,
+                        dataset_len=len(loader),
+                        loss=geo_loss.item(),
+                        start_loader_time=loader_start_time,
+                        batches_done=batch_idx + 1
+                    )
+
+                del data, z, z_tan
+            del loader, dataset
+            # gc.collect()
 
         # Log
         self._log_epoch_summary(epoch, start_epoch_time)
         self._update_epoch_time(epoch, start_epoch_time)
 
-        return total_loss / total_batches
+        return total_loss / max(1, total_batches)
 
-    def _train_node_level(self, optimizer, scheduler, epoch, resume_from=None):
-        return self._train_one_type(
-            data_names=self.pretrain_single_graph_data,
-            loader_creator=self._create_node_loader,
-            type_str='node',
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch,
-            resume_from=resume_from
-        )
-
-    def _train_graph_level(self, optimizer, scheduler, epoch, resume_from=None):
-        return self._train_one_type(
-            data_names=self.pretrain_multi_graph_data,
-            loader_creator=self._create_graph_loader,
-            type_str='graph',
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch,
-            resume_from=resume_from
-        )
-
-    def _train_one_type(self, data_names, loader_creator, type_str, optimizer, scheduler, epoch, resume_from=None):
-        """
-        type_str: 'node' or 'graph'
-        loader_creator: _create_node_loader or _create_graph_loader
-        """
-        total_loss = 0.0
-        total_batches = 0
-
-        num_datasets = len(data_names)
-        if num_datasets == 0:
-            return {'loss': 0.0, 'batches': 0}
-
-        start_idx = 0
-        if resume_from:
-            if resume_from['step_type'] == type_str:
-                try:
-                    start_idx = data_names.index(resume_from['last_data_name']) + 1
-                except ValueError:
-                    start_idx = 0
-                if start_idx >= num_datasets:
-                    return {'loss': 0.0, 'batches': 0}
-            elif resume_from['step_type'] == 'node' and type_str == 'graph':
-                start_idx = 0
-            elif resume_from['step_type'] == 'graph' and type_str == 'node':
-                self.logger.info("Already passed node-level stage. Skipping node-level training.")
-                return {'loss': 0.0, 'batches': 0}
-            else:
-                self.logger.warning(f"Unknown resume state: step_type={resume_from['step_type']}, current={type_str}")
-                return {'loss': 0.0, 'batches': 0}
-
-        if start_idx >= num_datasets:
-            return {'loss': 0.0, 'batches': 0}
-
-        if start_idx > 0:
-            self.logger.info(f"Resuming {type_str}-level from dataset {start_idx}: {data_names[start_idx]}")
-
-        for data_idx, data_name in enumerate(data_names):
-            if data_idx < start_idx:
-                continue
-
-            self.logger.info(f'Processing {type_str} loader {data_idx + 1}/{num_datasets}')
-            loader = loader_creator(data_name)
-            dataset_len = len(loader)
-            start_loader_time = time.time()
-
-            for batch_idx, data in enumerate(loader):
-                optimizer.zero_grad()
-                data = data.to(self.device)
-
-                # -------------Forward ------------
-                if type_str == 'node':
-                    batch_size_arg = data.batch_graph_nums
-                else:  # 'graph'
-                    batch_size_arg = data.batch_size
-
-                z, z_tan = self.model(data, batch_size_arg)
-
-                # ------------ Edge Index -----------
-                if type_str == 'node':
-                    edge_index = data.origin_edge_index
-                    loss_batch_size = loader.batch_size
-                else:  # 'graph'
-                    edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                    loss_batch_size = None
-
-                # --------------- Loss--------------
-                intra_loss = self.model.loss(z, z_tan, edge_index, batch_size=loss_batch_size)
-
-                if epoch >= self.configs.warmup_epochs:
-                    proto_loss = self.model.prototype_loss(data_name, z)
-                    intra_loss += proto_loss
-
-                intra_loss.backward()
-                optimizer.step()
-
-                # ------------- Update Prototype-------------
-                if loss_batch_size and type_str == 'node':
-                    z_mean = z[:loss_batch_size].mean(dim=0).detach().clone()
-                    z_tan_mean = z_tan[:loss_batch_size].mean(dim=0).detach().clone()
-                else:
-                    z_mean = z.mean(dim=0).detach().clone()
-                    z_tan_mean = z_tan.mean(dim=0).detach().clone()
-
-                self.model.update_prototype(data_name, z_mean, z_tan_mean)
-
-                del z_mean, z_tan_mean, data, z, z_tan
-
-                total_loss += intra_loss.item()
-                total_batches += 1
-
-                # -------------- Logging ----------------
-                if batch_idx % self.configs.log_interval == 0:
-                    self._log_progress(
-                        epoch=epoch,
-                        loader_type=type_str,
-                        loader_idx=data_idx + 1,
-                        batch_idx=batch_idx,
-                        dataset_len=dataset_len,
-                        loss=intra_loss.item(),
-                        start_loader_time=start_loader_time,
-                        batches_done=batch_idx + 1
-                    )
-
-            # -------------Checkpoint -----------------
-            self._save_temp_checkpoint(
-                data_name=data_name,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                epoch=epoch,
-                step_type=type_str,
-                data_idx=data_idx
-            )
-            del loader
-            torch.cuda.empty_cache()
-
-        return {'loss': total_loss, 'batches': total_batches}
-
-    def _log_progress(self, epoch, loader_type, loader_idx, batch_idx, dataset_len, loss, start_loader_time,
+    def _log_progress(self, epoch, batch_idx, dataset_len, loss, start_loader_time,
                       batches_done):
         current_time = time.time()
 
@@ -321,8 +273,7 @@ class Pretrainer:
             total_remaining_time = avg_epoch_time * remaining_epochs
 
         self.logger.info(
-            f'Epoch {epoch} | {loader_type} Loader {loader_idx} | '
-            f'Batch {batch_idx}/{dataset_len} | '
+            f'Epoch {epoch} | Batch {batch_idx}/{dataset_len} | '
             f'Loss: {loss:.6f} | '
             f'Loader ETA: {format_time(loader_remaining_time)} | '
             f'Total ETA: {format_time(total_remaining_time)}'
@@ -349,45 +300,21 @@ class Pretrainer:
         )
 
     def _update_epoch_time(self, epoch, start_epoch_time):
-        expected_len = epoch
-        if len(self.epoch_times) == expected_len:
-            self.epoch_times.append(time.time() - start_epoch_time)
+        epoch_duration = time.time() - start_epoch_time
+        self.epoch_times.append(epoch_duration)
 
-    def _create_node_loader(self, data_name):
-        data = load_pretrain_single_graph_data(self.configs, data_name)
-        node_loader = NeighborLoader(data, batch_size=self.configs.batch_size,
-                                     num_neighbors=self.configs.num_neighbors,
-                                     shuffle=True, num_workers=self.configs.num_workers,
-                                     transform=Compose([RootedEgoNets(self.configs.k_hops),
-                                                        RenameFromRootedEgoNets()]),
-                                     persistent_workers=False)
-        return node_loader
+    def _get_mix_loader(self):
+        datasets = []
 
-    def _create_graph_loader(self, data_name):
-        dataset = load_pretrain_multi_graph_data(self.configs, data_name)
-        graph_loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True,
-                                  num_workers=self.configs.num_workers, persistent_workers=False)
-        return graph_loader
+        for data_name in self.pretrain_single_graph_data:
+            data = load_pretrain_single_graph_data(self.configs, data_name)
+            datasets.append(Node2GraphDataset(data, self.configs.k_hops, self.dataset_dict[data_name]))
 
-    def _save_temp_checkpoint(self, data_name, optimizer, scheduler, epoch, step_type="node", data_idx=0):
-        temp_model_path = os.path.join(
-            self.tmp_checkpoint_dir,
-            f'temp_pretrain_epoch_{epoch}.pth'
-        )
-        temp_config = self.configs.__dict__.copy()
-        temp_config['resume_from'] = {
-            'epoch': epoch,
-            'step_type': step_type,
-            'last_data_name': data_name,
-            'last_data_idx': data_idx,
-            'next_step_type': step_type
-        }
-        save_checkpoint(
-            model=self.model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch,
-            config=temp_config,
-            filepath=temp_model_path
-        )
-        self.logger.info(f"Saved temporary checkpoint: {temp_model_path}")
+        for data_name in self.pretrain_multi_graph_data:
+            datasets.append(load_pretrain_multi_graph_data(self.configs, data_name, self.dataset_dict[data_name]))
+
+        datasets = ConcatDataset(datasets)
+        loader = DataLoader(datasets, batch_size=self.configs.batch_size, shuffle=True,
+                                  num_workers=self.configs.num_workers, persistent_workers=False,
+                            exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"])
+        return loader
