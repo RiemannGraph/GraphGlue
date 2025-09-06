@@ -186,7 +186,7 @@ class Pretrainer:
             triple_paths = search_adjacent_edges(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times)
             for t in range(self.configs.path_sample_times):
                 input_node_idx = torch.unique(triple_paths[t][1])
-                dataset = Node2GraphDataset(data, self.configs.k_hops, self.dataset_dict[data_name], input_node_idx)
+                dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.max_node_per_graph, self.dataset_dict[data_name], input_node_idx)
                 loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True, num_workers=self.configs.num_workers)
                 loader_start_time = time.time()
                 for batch_idx, data in enumerate(loader):

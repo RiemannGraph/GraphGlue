@@ -98,6 +98,7 @@ def parse_adaption_config() -> AdaptionConfig:
 
     config = AdaptionConfig(
         k_hops=args.k_hops,
+        max_node_per_graph=args.max_node_per_graph,
         root=args.root,
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,

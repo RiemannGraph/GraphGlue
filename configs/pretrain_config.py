@@ -80,6 +80,7 @@ def parse_pretrain_config() -> PretrainConfig:
 
     config = PretrainConfig(
         k_hops=args.k_hops,
+        max_node_per_graph=args.max_node_per_graph,
         root=args.root,
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,
