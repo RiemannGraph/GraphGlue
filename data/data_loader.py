@@ -140,13 +140,15 @@ class GraphDataset(Dataset):
 
     def get(self, idx):
         data = self.dataset[idx]
-        data.x = data.x.float()
-        data.y = data.y.long().reshape(-1)
-        if data.edge_weight is None:
-            data.edge_weight = torch.ones_like(data.edge_index[0]).float()
-        data.data_name_map = self.data_name_map
-        data.data_type = "graph"
-        return data
+        return Data(
+            x=data.x.float(),
+            edge_index=data.edge_index,
+            edge_weight=data.edge_weight \
+            if hasattr(data, 'edge_weight') and data.edge_weight is not None \
+            else torch.ones_like(data.edge_index[0]).float(),
+            data_name_map=self.data_name_map,
+            data_type="graph"
+        )
 
 
 class Node2GraphDataset(Dataset):
