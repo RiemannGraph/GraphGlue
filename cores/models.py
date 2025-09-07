@@ -297,15 +297,15 @@ class RiemannianPrototypeManager(nn.Module):
         z_tan_mean = scatter_mean(z_tan, data_name_map, dim=0)
         for i, dataset_name in enumerate([self.datasets_list[idx] for idx in dataset_idx]):
             if dataset_name not in self._proto_z_dict:
-                self._register_new_prototype(dataset_name, z_mean[i: i+1], z_tan_mean[i: i+1])
+                self._register_new_prototype(dataset_name, z_mean[i], z_tan_mean[i])
             else:
                 alpha = self.ema_alpha
                 proto_z = self._proto_z_dict[dataset_name]
                 proto_z_tan = self._proto_z_tan_dict[dataset_name]
 
                 # In-place EMA update
-                proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean[i: i+1])
-                proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean[i: i+1])
+                proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean[i])
+                proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean[i])
 
     def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
         """
