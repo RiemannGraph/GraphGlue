@@ -63,6 +63,19 @@ def search_adjacent_edges(edge_index, num_path_samples: int = None, path_sample_
     scores = (i_deg + j_deg + k_deg)
     prob = scores / scores.sum()
 
+    if len(prob) > 2 ** 24 - 1:
+        pre_sample_size = min(2 ** 24 - 1, len(prob))
+        pre_idx = torch.multinomial(prob, pre_sample_size, replacement=True)
+        pre_idx = torch.unique(pre_idx)
+        paths = paths[pre_idx]
+        j_deg = node_degree[paths[:, 1]]
+        i_deg = node_degree[paths[:, 0]]
+        k_deg = node_degree[paths[:, 2]]
+        scores = (i_deg + j_deg + k_deg)
+        prob = scores / scores.sum()
+
+    num_path_samples = min(num_path_samples, len(prob))
+
     if path_sample_times == 1:
         sampled_idx = torch.multinomial(prob, num_path_samples, replacement=False)
         sampled_paths = paths[sampled_idx].t().contiguous().unsqueeze(0)  # [1, 3, num_path_samples]
