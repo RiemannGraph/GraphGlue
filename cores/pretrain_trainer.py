@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 from torch.utils.data import ConcatDataset, WeightedRandomSampler
+from torch_geometric.data import Batch
 from cores.models import RPGraphFM
 from data import (
     load_pretrain_single_graph_data,
@@ -161,8 +162,12 @@ class Pretrainer:
             data = data.to(self.device)
             z, z_tan = self.model(data)
             knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-            triple_paths = search_triangles(knn_edge_index)
-            geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
+            triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples,
+                                                  self.configs.path_sample_times, return_relabel_mapping=True)
+            geo_loss = 0.
+            for t in range(self.configs.path_sample_times):
+                geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
+            geo_loss /= self.configs.path_sample_times
             geo_loss.backward()
             optimizer.step()
 
@@ -187,34 +192,32 @@ class Pretrainer:
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
             triple_paths, _, _ = search_triangles(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times, return_relabel_mapping=True)
+            loader_start_time = time.time()
             for t in range(self.configs.path_sample_times):
-                input_node_idx = torch.unique(triple_paths[t][1])
+                input_node_idx = torch.unique(triple_paths[t])
                 dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.max_node_per_graph, self.dataset_dict[data_name], input_node_idx)
-                loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True, num_workers=self.configs.num_workers)
-                loader_start_time = time.time()
-                for batch_idx, data in enumerate(loader):
-                    optimizer.zero_grad()
-                    data = data.to(self.device)
-                    z, z_tan = self.model(data)
-                    geo_loss = self.model.refine_struct_loss(z_tan, triple_paths[t])
-                    geo_loss.backward()
-                    optimizer.step()
+                graph = Batch.from_data_list([d for d in dataset]).to(self.device)
+                optimizer.zero_grad()
+                z, z_tan = self.model(graph)
+                geo_loss = self.model.refine_struct_loss(z_tan, triple_paths[t])
+                geo_loss.backward()
+                optimizer.step()
 
-                    total_loss += geo_loss.item()
-                    total_batches += 1
+                total_loss += geo_loss.item()
+                total_batches += 1
 
-                    if (batch_idx + 1) % self.configs.log_interval == 0:
-                        self._log_progress(
-                            epoch=epoch,
-                            batch_idx=batch_idx + 1,
-                            dataset_len=len(loader),
-                            loss=geo_loss.item(),
-                            start_loader_time=loader_start_time,
-                            batches_done=batch_idx + 1
-                        )
+                if (t + 1) % self.configs.log_interval == 0:
+                    self._log_progress(
+                        epoch=epoch,
+                        batch_idx=t + 1,
+                        dataset_len=self.configs.path_sample_times,
+                        loss=geo_loss.item(),
+                        start_loader_time=loader_start_time,
+                        batches_done=t + 1
+                    )
 
-                    del data, z, z_tan
-                del loader, dataset
+                del graph, z, z_tan, dataset
+            del data, triple_paths
                 # gc.collect()
 
         for data_name in self.pretrain_multi_graph_data:
@@ -226,8 +229,12 @@ class Pretrainer:
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
                 knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                triple_paths = search_triangles(knn_edge_index)
-                geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
+                triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples,
+                                                      self.configs.path_sample_times, return_relabel_mapping=True)
+                geo_loss = 0.
+                for t in range(self.configs.path_sample_times):
+                    geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
+                geo_loss /= self.configs.path_sample_times
                 geo_loss.backward()
                 optimizer.step()
 
