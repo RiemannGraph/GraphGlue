@@ -4,9 +4,8 @@ import numpy as np
 from downstream.adapter import RPGPrompt
 
 
-def _forward_pass(model, data, batch_graph_attr):
-    batch_graph_num = getattr(data, batch_graph_attr)
-    z, z_tan, align_loss = model(data, batch_graph_num)
+def _forward_pass(model, data):
+    z, z_tan, align_loss = model(data)
     pred = model.predict(z, data)
     return pred, align_loss
 
@@ -29,13 +28,9 @@ def train_step(loader, optimizer, model: RPGPrompt, device,
         optimizer.zero_grad()
         data = data.to(device)
 
-        pred, align_loss = _forward_pass(model, data, batch_graph_attr)
+        pred, align_loss = _forward_pass(model, data)
 
         label = getattr(data, label_attr)
-
-        if use_batch_size_limit:
-            pred = pred[:loader.batch_size]
-            label = label[:loader.batch_size]
 
         loss = F.cross_entropy(pred, label) + align_loss
         loss.backward()
@@ -60,12 +55,9 @@ def eval_step(loader, model: RPGPrompt, device,
     with torch.no_grad():
         for data in loader:
             data = data.to(device)
-            pred, align_loss = _forward_pass(model, data, batch_graph_attr)
+            pred, align_loss = _forward_pass(model, data)
 
             label = getattr(data, label_attr)
-            if use_batch_size_limit:
-                pred = pred[:loader.batch_size]
-                label = label[:loader.batch_size]
 
             loss = F.cross_entropy(pred, label) + align_loss
             total_loss += loss.item()

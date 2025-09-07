@@ -214,25 +214,11 @@ def unify_feature_dimension(
 
 
 def graph_few_shot_splits(dataset, k_shot, num_val, num_splits):
-    train_masks, val_masks, test_masks = [], [], []
-    for _ in range(num_splits):
-        train_mask, val_mask, test_mask = _graph_few_shot_one_split(dataset, k_shot, num_val)
-        train_masks.append(train_mask)
-        val_masks.append(val_mask)
-        test_masks.append(test_mask)
-    train_mask = torch.stack(train_masks, dim=1)
-    val_mask = torch.stack(val_masks, dim=1)
-    test_mask = torch.stack(test_masks, dim=1)
-    return train_mask, val_mask, test_mask
+    if hasattr(dataset, "labels"):
+        labels = dataset.labels.numpy().tolist()
+    else:
+        labels = [data.y.item() for data in dataset]
 
-
-def _graph_few_shot_one_split(dataset, k_shot=5, num_val=0.5) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Returns:
-        dataset_train, dataset_val, dataset_test
-    """
-
-    labels = [data.y.item() for data in dataset]
     num_classes = len(set(labels))
     num_graphs = len(dataset)
 
@@ -244,37 +230,48 @@ def _graph_few_shot_one_split(dataset, k_shot=5, num_val=0.5) -> tuple[torch.Ten
         if len(label_to_indices[y]) < k_shot:
             raise ValueError(f"Class {y} has only {len(label_to_indices[y])} graphs, but k_shot={k_shot}")
 
-    train_indices = []
-    remaining_indices = []
+    label_to_indices_np = [np.array(indices) for indices in label_to_indices]
 
-    for y in range(num_classes):
-        indices = np.array(label_to_indices[y])
-        np.random.shuffle(indices)
-        train_indices.extend(indices[:k_shot].tolist())
-        remaining_indices.extend(indices[k_shot:].tolist())
+    train_masks, val_masks, test_masks = [], [], []
 
-    val_size = int(len(remaining_indices) * num_val)
-    np.random.shuffle(remaining_indices)
+    for split_id in range(num_splits):
+        train_indices = []
+        remaining_indices = []
 
-    val_indices = remaining_indices[:val_size]
-    test_indices = remaining_indices[val_size:]
+        for y in range(num_classes):
+            indices = label_to_indices_np[y].copy()
+            np.random.shuffle(indices)
+            train_indices.extend(indices[:k_shot].tolist())
+            remaining_indices.extend(indices[k_shot:].tolist())
 
-    print(f"Total graphs: {num_graphs}")
-    print(f"Train (support): {len(train_indices)} graphs ({k_shot} per class)")
-    print(f"Val: {len(val_indices)} graphs")
-    print(f"Test: {len(test_indices)} graphs")
-    print(f"Val ratio in remaining: {len(val_indices) / (len(val_indices) + len(test_indices)):.2f}")
+        remaining_indices = np.array(remaining_indices)
+        np.random.shuffle(remaining_indices)
+        val_size = int(len(remaining_indices) * num_val)
+        val_indices = remaining_indices[:val_size]
+        test_indices = remaining_indices[val_size:]
 
-    train_mask = np.zeros(len(dataset), dtype=bool)
-    val_mask = np.zeros(len(dataset), dtype=bool)
-    test_mask = np.zeros(len(dataset), dtype=bool)
-    train_mask[train_indices] = True
-    val_mask[val_indices] = True
-    test_mask[test_indices] = True
+        train_mask = torch.zeros(num_graphs, dtype=torch.bool)
+        val_mask = torch.zeros(num_graphs, dtype=torch.bool)
+        test_mask = torch.zeros(num_graphs, dtype=torch.bool)
 
-    train_mask = torch.tensor(train_mask, dtype=torch.bool)
-    val_mask = torch.tensor(val_mask, dtype=torch.bool)
-    test_mask = torch.tensor(test_mask, dtype=torch.bool)
+        train_mask[train_indices] = True
+        val_mask[val_indices] = True
+        test_mask[test_indices] = True
+
+        train_masks.append(train_mask)
+        val_masks.append(val_mask)
+        test_masks.append(test_mask)
+
+        if split_id == 0:
+            print(f"Total graphs: {num_graphs}")
+            print(f"Train (support): {len(train_indices)} graphs ({k_shot} per class)")
+            print(f"Val: {len(val_indices)} graphs")
+            print(f"Test: {len(test_indices)} graphs")
+            print(f"Val ratio in remaining: {len(val_indices) / (len(val_indices) + len(test_indices)):.2f}")
+
+    train_mask = torch.stack(train_masks, dim=1)
+    val_mask = torch.stack(val_masks, dim=1)
+    test_mask = torch.stack(test_masks, dim=1)
 
     return train_mask, val_mask, test_mask
 

@@ -15,10 +15,11 @@ from utils.checkpoints import (
     cleanup_old_checkpoints,
     EarlyStopping
 )
-from data.data_loader import (
+from data import (
     load_few_shot_multi_graph_data,
     load_few_shot_single_graph_data,
-    load_few_shot_link_graph_data
+    load_few_shot_link_graph_data,
+    Node2GraphDataset
 )
 from downstream.tasks import train_step, eval_step
 from downstream.adapter import RPGPrompt
@@ -150,30 +151,16 @@ class AdaptTrainer:
         val_loaders = []
         test_loaders = []
         if configs.task_type == "node_cls":
-            dataset, data = load_few_shot_single_graph_data(configs, configs.data_name,
-                                                           configs.k_shot, configs.num_trials,
-                                                           configs.num_val)
+            dataset, train_mask, val_mask, test_mask = load_few_shot_single_graph_data(configs, configs.data_name,
+                                                                                      configs.k_shot,
+                                                                                      configs.num_trials,
+                                                                                      configs.num_val)
             num_classes = dataset.num_classes
             num_features = dataset.num_features
             for t in range(configs.num_trials):
-                train_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                         input_nodes=data.train_mask[:, t],
-                                                         shuffle=True, batch_size=configs.batch_size,
-                                                   transform=Compose([RootedEgoNets(configs.k_hops),
-                                                                      RenameFromRootedEgoNets()])
-                                                   ))
-                val_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                       input_nodes=data.val_mask[:, t],
-                                                       shuffle=False, batch_size=configs.batch_size,
-                                                 transform=Compose([RootedEgoNets(configs.k_hops),
-                                                                    RenameFromRootedEgoNets()])
-                                                 ))
-                test_loaders.append(NeighborLoader(data, configs.num_neighbors,
-                                                        input_nodes=data.test_mask[:, t],
-                                                        shuffle=False, batch_size=configs.batch_size,
-                                                  transform=Compose([RootedEgoNets(configs.k_hops),
-                                                                     RenameFromRootedEgoNets()])
-                                                  ))
+                train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
         elif configs.task_type == "graph_cls":
             dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
@@ -186,7 +173,7 @@ class AdaptTrainer:
                 test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
 
         elif configs.task_type == "link_cls":
-            dataset, data, masks = load_few_shot_link_graph_data(configs, configs.data_name,
+            dataset, data, masks = load_few_shot_link_graph_data(configs, configs.data_name_map,
                                                                  configs.k_shot, configs.num_trials,
                                                                  configs.num_val)
             num_classes = len(data.edge_type.unique())

@@ -59,8 +59,7 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
     transform = T.Compose([
         FlattenLabels(),
         T.RandomNodeSplit(split='test_rest', num_splits=num_splits,
-                          num_train_per_class=k_shot, num_val=num_val),
-        UnifyFeatureDims(configs.in_dim)
+                          num_train_per_class=k_shot, num_val=num_val)
     ])
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=T.Compose([T.ToUndirected(), transform]))
@@ -77,10 +76,9 @@ def load_few_shot_single_graph_data(configs, data_name, k_shot, num_splits, num_
     else:
         raise ValueError('Invalid data_name')
     data = dataset[0]
-    if data.edge_weight is None:
-        data.edge_weight = torch.ones_like(data.edge_index[0]).float()
-    data.edge_index, data.edge_weight = to_undirected(data.edge_index, data.edge_weight, num_nodes=data.num_nodes)
-    return dataset, data
+    dataset = Node2GraphDataset(data, configs.k_hops, configs.max_node_per_graph)
+    train_mask, val_mask, test_mask = graph_few_shot_splits(dataset, k_shot, num_val, num_splits)
+    return dataset, train_mask, val_mask, test_mask
 
 
 def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_val=0.5):
@@ -144,6 +142,7 @@ class GraphDataset(Dataset):
         data = self.dataset[idx]
         return Data(
             x=data.x.float(),
+            y=data.y.long().reshape(-1) if hasattr(data, 'y') and data.y is not None else None,
             edge_index=data.edge_index,
             edge_weight=data.edge_weight \
             if hasattr(data, 'edge_weight') and data.edge_weight is not None \
@@ -175,6 +174,7 @@ class Node2GraphDataset(Dataset):
         self.input_node_idx = input_node_idx if input_node_idx is not None else torch.arange(data.num_nodes)
         self.data_name_map = data_name_map
         self.max_nodes_per_graph = max_nodes_per_graph
+        self.labels = data.y
 
     @property
     def dataset_type(self):
@@ -194,6 +194,7 @@ class Node2GraphDataset(Dataset):
         )
         data = Data(
             x=self.data.x[subset],
+            y=self.data.y[target_node] if hasattr(self.data, 'y') and self.data.y is not None else None,
             edge_index=edge_index,
             original_node_ids=subset,
             center_node_idx=mapping.item(), # target node index in subset
@@ -218,10 +219,11 @@ class Node2GraphDataset(Dataset):
                 return_edge_mask=True
             )
             data = Data(
-                x=data.x[sampled_nodes] if data.x is not None else None,
+                x=data.x[sampled_nodes],
+                y=data.y if hasattr(data, 'y') and data.y is not None else None,
                 edge_index=sampled_edge_index,
                 original_node_ids=subset[sampled_nodes],
-                center_node_idx=-1,
+                center_node_idx=mapping,
                 edge_weight=data.edge_weight[edge_mask] \
                     if hasattr(data, 'edge_weight') and data.edge_weight is not None \
                     else torch.ones_like(sampled_edge_index[0]).float(),

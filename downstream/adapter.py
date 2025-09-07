@@ -20,6 +20,7 @@ class RPGPrompt(nn.Module):
         super(RPGPrompt, self).__init__()
         assert task_type in ["node_cls", "graph_cls", "link_cls"], "the task type must be one of [node_cls, graph_cls, link_cls]"
         self.configs = configs
+        self.input_lin = nn.Linear(feature_dim, configs.in_dim)
         self.pretrained_model = pretrained_model
         self.pretrained_model.frozen()
         self.prompt_z = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))
@@ -36,21 +37,17 @@ class RPGPrompt(nn.Module):
         self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.head = ADAPTERS[task_type](configs.hid_dim, num_cls)
 
-    def forward(self, graph: Data, batch_graph_nums: int = None):
-        if batch_graph_nums is None:
-            if hasattr(graph, "batch_graph_nums"):
-                batch_graph_nums = graph.batch_graph_nums
-            else:
-                batch_graph_nums = graph.batch_size
-        z, z_tan = self.pretrained_model(graph, batch_graph_nums)
+    def forward(self, graph: Data):
+        graph.x = self.input_lin(graph.x)
+        z, z_tan = self.pretrained_model(graph)
         z = z @ self.prompt_z
         weights = self.gated_func(z).softmax(-1)    # [*, K]
         _, _, proto_z_tan = self.pretrained_model.get_all_prototypes()
-        z_tan_align = torch.einsum('ij,jkl->ikl', weights, proto_z_tan)   # [*, M, d]
+        z_tan_align = torch.einsum('ij,jkl->ikl', weights, proto_z_tan.squeeze(1))   # [*, M, d]
         z_tan_adapt = z_tan @ self.prompt_z_tan
         align_loss =  torch.frobenius_norm(z_tan_adapt - z_tan_align, dim=[1, 2]).mean()
-        # ptgb_loss = self.ptg_loss(z_tan_align)
-        loss = align_loss * self.align_coef
+        ptgb_loss = self.ptg_loss(z_tan_align)
+        loss = align_loss * self.align_coef + ptgb_loss
         return z, z_tan_adapt, loss
 
     def predict(self, z: torch.Tensor, graph: Data):

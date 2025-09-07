@@ -2,7 +2,7 @@ import torch
 from cores.models import PTGB, PooLedSubgraphGNN
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader, NeighborLoader
-from data.data_process import search_adjacent_edges, unify_feature_dimension, RenameFromRootedEgoNets
+from data.data_process import search_triangles, unify_feature_dimension, RenameFromRootedEgoNets
 from torch_geometric.transforms import RootedEgoNets, Compose
 
 
@@ -16,7 +16,7 @@ if __name__ == '__main__':
     loader = NeighborLoader(graph, batch_size=2, shuffle=False, num_neighbors=[-1], disjoint=False, transform=Compose([RootedEgoNets(1), RenameFromRootedEgoNets()]))
     z_tans = []
     for graph in loader:
-        paths = search_adjacent_edges(graph.origin_edge_index)
+        paths = search_triangles(graph.origin_edge_index)
         aug_graphs = ptgb(graph.x, graph.edge_index, graph.edge_weight, graph.batch, graph.batch_graph_nums)
         z_tan = []
         for aug_graph in aug_graphs:
