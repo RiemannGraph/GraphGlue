@@ -10,6 +10,7 @@ class AdaptionConfig(ModelConfig):
     # Data
     data_name: str = "PubMed"
     pretrained_checkpoint: str = "checkpoints/pretrain/pretrain_final_model.pth"
+    num_neighbors: List[int] = None
 
     # Task
     task_type: str = "node_cls"
@@ -41,9 +42,9 @@ def get_pretrain_parser():
                         help="Name of the dataset. [ogbn-arxiv, Computers, Reddit, FB15k_237, PROTEINS, HIV] ")
     parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_cls"],
                         help="Type of downstream task.")
-    parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/Computers/temp_pretrain_epoch_0.pth",
+    parser.add_argument("--pretrained_checkpoint", type=str, default="checkpoints/pretrain_epoch_1.pth",
                         help="file path of pretrained model checkpoint.")
-
+    parser.add_argument("--num_neighbors", type=int, nargs='+', default=[10, 8])
     # Task
     parser.add_argument("--k_shot", type=int, default=5,
                         help="Number of shots in few-shot learning.")
@@ -97,6 +98,7 @@ def parse_adaption_config() -> AdaptionConfig:
                     setattr(args, key, value)
 
     config = AdaptionConfig(
+        num_neighbors=args.num_neighbors,
         k_hops=args.k_hops,
         max_node_per_graph=args.max_node_per_graph,
         root=args.root,
@@ -142,7 +144,9 @@ def parse_adaption_config() -> AdaptionConfig:
         max_grad_norm=args.max_grad_norm,
         eval_interval=args.eval_interval,
         resume_checkpoint=args.resume_checkpoint,
-        patience=args.patience
+        patience=args.patience,
+
+        num_generators=args.num_generators,
     )
 
     if args.config_save_path:

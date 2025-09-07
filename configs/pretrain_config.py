@@ -30,13 +30,13 @@ def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Training
-    parser.add_argument('--batch_size', type=int, default=4,
+    parser.add_argument('--batch_size', type=int, default=64,
                         help='Batch size for data loading')
-    parser.add_argument('--num_path_samples', type=int, default=1000,
+    parser.add_argument('--num_path_samples', type=int, default=100,
                        help='Number of adjacent edge samples')
     parser.add_argument('--path_sample_times', type=int, default=20,
                         help='Times of path samples')
-    parser.add_argument('--pretrain_epochs', type=int, default=10,
+    parser.add_argument('--pretrain_epochs', type=int, default=100,
                         help='Total pretrain epochs')
     parser.add_argument('--lr_pretrain', type=float, default=3e-4,
                         help='Learning rate for pretraining')
@@ -44,7 +44,7 @@ def get_pretrain_parser():
                         help='Weight decay for Adam optimizer')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='Max gradient norm for clipping')
-    parser.add_argument('--log_interval', type=int, default=10,
+    parser.add_argument('--log_interval', type=int, default=100,
                         help='Log every N batches')
     parser.add_argument('--save_interval', type=int, default=1,
                         help='Save checkpoint every N epochs')

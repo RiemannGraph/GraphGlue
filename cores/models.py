@@ -297,7 +297,7 @@ class RiemannianPrototypeManager(nn.Module):
         z_tan_mean = scatter_mean(z_tan, data_name_map, dim=0)
         for i, dataset_name in enumerate([self.datasets_list[idx] for idx in dataset_idx]):
             if dataset_name not in self._proto_z_dict:
-                self._register_new_prototype(dataset_name, z_mean, z_tan_mean)
+                self._register_new_prototype(dataset_name, z_mean[i: i+1], z_tan_mean[i: i+1])
             else:
                 alpha = self.ema_alpha
                 proto_z = self._proto_z_dict[dataset_name]

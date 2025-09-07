@@ -30,7 +30,7 @@ class ModelConfig:
     in_dim: int = 128
     hid_dim: int = 256
     att_dim: int = 512
-    num_generators: int = 64
+    num_generators: int = 32
     bias: bool = True
     act_str: str = "gelu"
     drop: float = 0.1
@@ -43,7 +43,7 @@ class ModelConfig:
     ema_alpha: float = 0.99
     geo_regular_coef: float = 0.1
 
-    knn: int = 10
+    knn: int = 5
 
     """Shared Loader"""
     num_workers: int = 2
@@ -54,14 +54,14 @@ def add_model_config(parser: ArgumentParser):
     group = parser.add_argument_group("Model Architecture")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                       default=["ogbn-arxiv", "Computers", "FB15k_237"],
+                       default=["Computers"],
                        help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
                        default=["PROTEINS", "HIV"],
                        help='graph-level pretraining datasets')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--max_node_per_graph', type=int, default=500,
+    parser.add_argument('--max_node_per_graph', type=int, default=100,
                         help='maximum number of nodes per graph')
 
     # Node2Vec parameters (for KGs without node features)
@@ -114,7 +114,7 @@ def add_model_config(parser: ArgumentParser):
     group.add_argument('--geo_regular_coef', type=float, default=0.1,
                        help='Regularization coefficient of PT')
 
-    parser.add_argument('--knn', type=int, default=10,
+    parser.add_argument('--knn', type=int, default=5,
                         help='KNN graph connections for inter-graph loss')
 
     parser.add_argument('--num_workers', type=int, default=2,
