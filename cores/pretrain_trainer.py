@@ -153,6 +153,7 @@ class Pretrainer:
             # gc.collect()
 
         # ===== Mix training for global distribution =====
+        self.logger.info("---------------Mix training for global distribution----------------")
         loader_start_time = time.time()
         for batch_idx, data in enumerate(loader):
             optimizer.zero_grad()
@@ -181,6 +182,7 @@ class Pretrainer:
             # gc.collect()
 
         # ===== Refine manifold structure from locality =====
+        self.logger.info("--------------Refine manifold structure from locality---------------")
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
             triple_paths = search_adjacent_edges(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times)
