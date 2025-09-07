@@ -120,6 +120,7 @@ class Pretrainer:
         total_batches = 0
 
         # ===== Mix training for locality =====
+        self.logger.info("---------------Mix training for locality----------------")
         loader = self._get_mix_loader()
         loader_start_time = time.time()
         for batch_idx, data in enumerate(loader):

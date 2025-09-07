@@ -128,7 +128,7 @@ class RPGraphFM(nn.Module):
 
         :return: loss for each graph batch or all datasets
         """
-        if len(triple_paths):
+        if triple_paths.numel() > 0:
             vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
             z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
             pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
@@ -142,7 +142,7 @@ class RPGraphFM(nn.Module):
 
             geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
         else:
-            geo_loss = 0
+            geo_loss = torch.zeros(1, device=z_tan.device, dtype=z_tan.dtype, requires_grad=True).squeeze()
 
         return geo_loss
 
