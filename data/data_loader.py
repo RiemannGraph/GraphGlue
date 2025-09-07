@@ -123,7 +123,7 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
 
 
 class GraphDataset(Dataset):
-    def __init__(self, dataset: Dataset, data_name_map: int):
+    def __init__(self, dataset: Dataset, data_name_map: Optional[int] = None):
         """
 
         :param dataset: Graph-level dataset
