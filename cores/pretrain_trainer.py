@@ -7,7 +7,7 @@ from data import (
     load_pretrain_single_graph_data,
     load_pretrain_multi_graph_data,
     Node2GraphDataset,
-    search_adjacent_edges)
+    search_triangles)
 from utils.logger import create_logger
 from utils.checkpoints import (
     save_checkpoint,
@@ -161,7 +161,7 @@ class Pretrainer:
             data = data.to(self.device)
             z, z_tan = self.model(data)
             knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-            triple_paths = search_adjacent_edges(knn_edge_index)
+            triple_paths = search_triangles(knn_edge_index)
             geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
             geo_loss.backward()
             optimizer.step()
@@ -186,7 +186,7 @@ class Pretrainer:
         self.logger.info("--------------Refine manifold structure from locality---------------")
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
-            triple_paths = search_adjacent_edges(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times)
+            triple_paths, _, _ = search_triangles(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times, return_relabel_mapping=True)
             for t in range(self.configs.path_sample_times):
                 input_node_idx = torch.unique(triple_paths[t][1])
                 dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.max_node_per_graph, self.dataset_dict[data_name], input_node_idx)
@@ -226,7 +226,7 @@ class Pretrainer:
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
                 knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                triple_paths = search_adjacent_edges(knn_edge_index)
+                triple_paths = search_triangles(knn_edge_index)
                 geo_loss = self.model.refine_struct_loss(z_tan, triple_paths)
                 geo_loss.backward()
                 optimizer.step()

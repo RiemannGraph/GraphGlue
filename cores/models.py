@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data, Batch
+from torch_geometric.utils import to_undirected, remove_self_loops
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
@@ -198,23 +199,39 @@ class RPGraphFM(nn.Module):
     @staticmethod
     def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):
         """
-        Construct KNN graph for graph-level datasets.
+        Construct symmetric KNN graph (undirected, no self-loops).
 
-        :param h: All the graph representations for a graph-level dataset.
-        :param top_k: the number of K nearest neighbors.
-        :param return_weight: If True, return edge_weight, otherwise, return None.
+        :param h: [N, D] node features
+        :param top_k: number of neighbors (excluding self)
+        :param return_weight: whether to return edge weights
 
-        :return: edge_index, edge_weight [Torch.Tensor, torch.Tensor]
+        :return: edge_index [2, E], edge_weight [E] (optional)
         """
-        if top_k > h.shape[0]:
-            top_k = h.shape[0]
-        similarity = h @ h.t()
-        _, indices = similarity.topk(k=top_k, dim=-1)
-        edge_index = indices.t()
+        N = h.shape[0]
+        if top_k >= N:
+            top_k = N - 1
+
+        similarity = h @ h.t()  # [N, N]
+
+        topk_vals, topk_indices = similarity.topk(k=top_k + 1, dim=-1)
+        topk_indices = topk_indices[:, 1:]  # [N, top_k]
+        topk_vals = topk_vals[:, 1:]
+
+        row = torch.arange(N, device=h.device).unsqueeze(1).expand(N, top_k)  # [N, top_k]
+        col = topk_indices  # [N, top_k]
+
+        edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)  # [2, N * top_k]
+
+        edge_index = to_undirected(edge_index, num_nodes=N)
+
+        edge_index, _ = remove_self_loops(edge_index)
+
         if return_weight:
-            edge_weight = similarity[edge_index[0], edge_index[1]]
+            row, col = edge_index
+            edge_weight = similarity[row, col]
         else:
             edge_weight = None
+
         return edge_index, edge_weight
 
     @staticmethod
