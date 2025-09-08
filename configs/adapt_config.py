@@ -37,9 +37,9 @@ class AdaptionConfig(ModelConfig):
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
 
-    parser.add_argument("--data_name", type=str, default="Computers",
+    parser.add_argument("--data_name", type=str, default="FB15k_237",
                         help="Name of the dataset. [ogbn-arxiv, Computers, Reddit, FB15k_237, PROTEINS, HIV] ")
-    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_cls"],
+    parser.add_argument("--task_type", type=str, default="link_cls", choices=["node_cls", "graph_cls", "link_cls"],
                         help="Type of downstream task.")
     parser.add_argument("--pretrained_checkpoint", type=str,
                         default="checkpoints/ogbn-arxiv_Computers_FB15k_237_PROTEINS_HIV/pretrain_final_model.pth",
@@ -73,8 +73,8 @@ def get_pretrain_parser():
                         help="Patience for early stopping.")
 
     # Config IO
-    parser.add_argument('--config_save_path', type=str, default=None,
-                        help='Path to save current config as YAML (optional)')
+    parser.add_argument('--save_config', action="store_false",
+                        help='Whether to save current config as YAML (optional)')
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
 
@@ -147,11 +147,20 @@ def parse_adaption_config() -> AdaptionConfig:
         num_generators=args.num_generators,
     )
 
-    if args.config_save_path:
-        save_config_to_yaml(config, args.config_save_path)
+
+    dir_name = ""
+    for d in config.pretrain_single_graph_data:
+        dir_name += f"{d}_"
+    for d in config.pretrain_multi_graph_data:
+        dir_name += f"{d}_"
 
     # Paths
-    config.log_path = f"logs/{config.task_type}/{config.k_shot}-shot/{config.data_name}.log"
-    config.checkpoint_dir = f"checkpoints/{config.task_type}/{config.k_shot}-shot/{config.data_name}/"
+    suffix = f"{dir_name[:-1]}/{config.task_type}/{config.k_shot}-shot_{config.data_name}"
+    config.log_path = f"logs/{suffix}.log"
+    config.checkpoint_dir = f"checkpoints/{suffix}/"
+
+    if args.save_config:
+        config_save_path = f"./scripts/{suffix}.yaml"
+        save_config_to_yaml(config, config_save_path)
 
     return config

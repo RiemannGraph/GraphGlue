@@ -17,8 +17,7 @@ def _compute_metrics(preds_list, trues_list):
     return acc
 
 
-def train_step(loader, optimizer, model: RPGPrompt, device,
-               label_attr='y', use_batch_size_limit=False, batch_graph_attr='batch_graph_nums'):
+def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y'):
     model.train()
     total_loss = 0.0
     preds_list = []
@@ -45,8 +44,7 @@ def train_step(loader, optimizer, model: RPGPrompt, device,
     return avg_loss, acc
 
 
-def eval_step(loader, model: RPGPrompt, device,
-              label_attr='y', use_batch_size_limit=False, batch_graph_attr='batch_graph_nums'):
+def eval_step(loader, model: RPGPrompt, device, label_attr='y'):
     model.eval()
     total_loss = 0.0
     preds_list = []

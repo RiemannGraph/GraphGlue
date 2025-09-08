@@ -3,43 +3,39 @@ import time
 
 import numpy as np
 import torch
-from torch_geometric.loader import NeighborLoader, DataLoader, LinkNeighborLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch_geometric.loader import DataLoader
 
 from cores.models import RPGraphFM
-from utils.checkpoints import (
-    save_checkpoint,
-    load_checkpoint,
-    get_latest_checkpoint,
-    cleanup_old_checkpoints,
-    EarlyStopping
-)
 from data import (
     load_few_shot_multi_graph_data,
     load_few_shot_single_graph_data,
     load_few_shot_link_graph_data,
-    Node2GraphDataset
+    LinkDataLoader
 )
-from downstream.tasks import train_step, eval_step
 from downstream.adapter import RPGPrompt
+from downstream.tasks import train_step, eval_step
+from utils.checkpoints import (
+    load_checkpoint,
+    get_latest_checkpoint,
+    EarlyStopping
+)
 from utils.logger import create_logger
-from torch_geometric.transforms import RootedEgoNets, Compose
-from data.data_transform import RenameFromRootedEgoNets
 
 
 class AdaptTrainer:
     TASK_CONFIGS = {
-        'node_cls': {'label_attr': 'y', 'use_batch_size_limit': True, 'batch_graph_attr': 'batch_graph_nums'},
-        'graph_cls': {'label_attr': 'y', 'use_batch_size_limit': False, 'batch_graph_attr': 'batch_size'},
-        'link_cls': {'label_attr': 'edge_type', 'use_batch_size_limit': False, 'batch_graph_attr': 'batch_graph_nums'},
+        'node_cls': {'label_attr': 'y'},
+        'graph_cls': {'label_attr': 'y'},
+        'link_cls': {'label_attr': 'edge_label'},
     }
     def __init__(self, configs, logger=None):
         self.configs = configs
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logger if logger is not None else create_logger(configs.log_path)
 
-        dataset, loaders, num_classes, num_features = self.get_loaders(configs)
+        loaders, num_classes, num_features = self.get_loaders(configs)
         self.train_loaders = loaders[0]
         self.val_loaders = loaders[1]
         self.test_loaders = loaders[2]
@@ -58,14 +54,6 @@ class AdaptTrainer:
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
 
     def train(self):
-        early_stopping = EarlyStopping(
-            patience=self.configs.patience,
-            mode='max',
-            delta=0.001,
-            checkpoint_dir=self.configs.checkpoint_dir,
-            verbose=True
-        )
-
         optimizer = Adam(
             self.model.parameters(),
             lr=self.configs.lr_task,
@@ -87,6 +75,13 @@ class AdaptTrainer:
         # Train loop
         total_acc = []
         for trial in range(self.configs.num_trials):
+            early_stopping = EarlyStopping(
+                patience=self.configs.patience,
+                mode='max',
+                delta=0.001,
+                checkpoint_dir=self.configs.checkpoint_dir,
+                verbose=True
+            )
             self.model.train()
             for epoch in range(self.start_epoch, self.configs.task_epochs):
                 epoch_start_time = time.time()
@@ -107,15 +102,7 @@ class AdaptTrainer:
                     val_loss, val_acc = eval_step(self.val_loaders[trial], self.model, self.device,
                                            **AdaptTrainer.TASK_CONFIGS[self.task_type])
                     self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc * 100:.2f}%')
-                    # save_checkpoint(
-                    #     model=self.model,
-                    #     optimizer=optimizer,
-                    #     scheduler=scheduler,
-                    #     epoch=epoch + 1,
-                    #     config=self.configs.__dict__,
-                    #     filepath=os.path.join(self.configs.checkpoint_dir,
-                    #                           f'downstream_{trial + 1}_epoch_{epoch + 1}.pth')
-                    # )
+
                     if early_stopping.step(
                             metric=val_acc,
                             model=self.model,
@@ -158,9 +145,15 @@ class AdaptTrainer:
             num_classes = dataset.num_classes
             num_features = dataset.num_features
             for t in range(configs.num_trials):
-                train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
-                val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
-                test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False, exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                train_loaders.append(DataLoader(dataset[train_mask[:, t]],
+                                                batch_size=configs.batch_size, shuffle=True,
+                                                exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                val_loaders.append(DataLoader(dataset[val_mask[:, t]],
+                                              batch_size=configs.batch_size, shuffle=False,
+                                              exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                test_loaders.append(DataLoader(dataset[test_mask[:, t]],
+                                               batch_size=configs.batch_size, shuffle=False,
+                                               exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
         elif configs.task_type == "graph_cls":
             dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
@@ -173,43 +166,15 @@ class AdaptTrainer:
                 test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
 
         elif configs.task_type == "link_cls":
-            dataset, data, masks = load_few_shot_link_graph_data(configs, configs.data_name_map,
+            data, train_sets, val_sets, test_sets = load_few_shot_link_graph_data(configs, configs.data_name,
                                                                  configs.k_shot, configs.num_trials,
                                                                  configs.num_val)
             num_classes = len(data.edge_type.unique())
             num_features = data.x.shape[-1]
-            train_mask, val_mask, test_mask = masks
             for t in range(configs.num_trials):
-                train_loaders.append(
-                    LinkNeighborLoader(data, shuffle=True, batch_size=configs.batch_size,
-                                       num_workers=configs.num_workers,
-                                       edge_label_index=data.edge_index[:, train_mask[:, t]],
-                                       edge_label=data.edge_type[train_mask[:, t]],
-                                       num_neighbors=configs.num_neighbors,
-                                       transform=Compose([RootedEgoNets(configs.k_hops),
-                                                          RenameFromRootedEgoNets()])
-                                       )
-                )
-                val_loaders.append(
-                    LinkNeighborLoader(data, shuffle=False, batch_size=configs.batch_size,
-                                       num_workers=configs.num_workers,
-                                       edge_label_index=data.edge_index[:, val_mask[:, t]],
-                                       edge_label=data.edge_type[val_mask[:, t]],
-                                       num_neighbors=configs.num_neighbors,
-                                       transform=Compose([RootedEgoNets(configs.k_hops),
-                                                          RenameFromRootedEgoNets()])
-                                       )
-                )
-                test_loaders.append(
-                    LinkNeighborLoader(data, shuffle=False, batch_size=configs.batch_size,
-                                       num_workers=configs.num_workers,
-                                       edge_label_index=data.edge_index[:, test_mask[:, t]],
-                                       edge_label=data.edge_type[test_mask[:, t]],
-                                       num_neighbors=configs.num_neighbors,
-                                       transform=Compose([RootedEgoNets(configs.k_hops),
-                                                          RenameFromRootedEgoNets()])
-                                       )
-                )
+                train_loaders.append(LinkDataLoader(train_sets[t], batch_size=configs.batch_size, shuffle=True))
+                val_loaders.append(LinkDataLoader(val_sets[t], batch_size=configs.batch_size, shuffle=False))
+                test_loaders.append(LinkDataLoader(test_sets[t], batch_size=configs.batch_size, shuffle=False))
         else:
             raise NotImplementedError
-        return dataset, (train_loaders, val_loaders, test_loaders), num_classes, num_features
+        return (train_loaders, val_loaders, test_loaders), num_classes, num_features

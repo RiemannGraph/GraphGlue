@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from cores.layers import ActivateModule
 from cores.loss_funcs import PTGBLoss
-from cores.models import RPGraphFM, FeedForwardLayer
+from cores.models import RPGraphFM
 from torch_geometric.data import Data
 
 
@@ -83,10 +83,8 @@ class LinkClassificationAdapter(nn.Module):
         self.score_fn = nn.Bilinear(hid_dim, hid_dim, num_classes)
 
     def forward(self, z: torch.Tensor, graph: Data):
-        edge_index = graph.edge_index
-        z = z[graph.n_id]
-        src_emb = z[edge_index[0]]
-        dst_emb = z[edge_index[1]]
+        src_emb = z[::2]
+        dst_emb = z[1::2]
         return self.score_fn(src_emb, dst_emb)
 
 
