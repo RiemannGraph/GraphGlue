@@ -54,9 +54,8 @@ def get_pretrain_parser():
                         help="Number of warmup epochs to compute prototype loss")
 
     # Config IO
-    parser.add_argument('--config_save_path', type=str, default="./scripts/pretrain/pretrain.yaml",
-                        help='Path to save current config as YAML (optional)' \
-                             'default path format is ./scripts/pretrain/pretrain.yaml')
+    parser.add_argument('--save_config', action="store_false",
+                        help='Whether to save current config as YAML (optional)')
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
 
@@ -133,8 +132,8 @@ def parse_pretrain_config() -> PretrainConfig:
 
     config.checkpoint_dir = f"checkpoints/pretrain/{dir_name[:-1]}"
     config.log_path = f"logs/pretrain/{dir_name[:-1]}.log"
-    args.config_save_path = f"./scripts/pretrain/{dir_name[:-1]}.yaml"
 
-    if args.config_save_path:
-        save_config_to_yaml(config, args.config_save_path)
+    if args.save_config:
+        config_save_path = f"./scripts/pretrain/{dir_name[:-1]}.yaml"
+        save_config_to_yaml(config, config_save_path)
     return config
