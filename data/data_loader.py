@@ -156,7 +156,7 @@ class Node2GraphDataset(Dataset):
             self,
             data: Data,
             k_hops: int = 2,
-            max_nodes_per_graph=None,
+            num_neighbors: Optional[List[int]] = None,
             data_name_map: int = None,
             input_node_idx: torch.Tensor = None,
     ):
@@ -168,15 +168,15 @@ class Node2GraphDataset(Dataset):
         :param input_node_idx: nodes to extract subgraph. if None, extract all nodes.
         """
         super(Node2GraphDataset, self).__init__()
+        assert len(num_neighbors) == k_hops, "sampling neighbor hops should be equal to k_hops"
         self.data = data
         self.k_hops = k_hops
         self.input_node_idx = input_node_idx if input_node_idx is not None else torch.arange(data.num_nodes)
         self.data_name_map = data_name_map
-        self.max_nodes_per_graph = max_nodes_per_graph
         self.labels = data.y
         self.sampler = NeighborSampler(
                         data.edge_index,
-                        sizes=[10, 10],
+                        sizes=num_neighbors,
                         node_idx=self.input_node_idx,
                         num_nodes=data.num_nodes
                         )
