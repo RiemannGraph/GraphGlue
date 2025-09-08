@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 from torch.utils.data import ConcatDataset, WeightedRandomSampler
 from torch_geometric.data import Batch
@@ -7,16 +6,16 @@ from cores.models import RPGraphFM
 from data import (
     load_pretrain_single_graph_data,
     load_pretrain_multi_graph_data,
-    Node2GraphDataset,
-    search_triangles)
-from utils.logger import create_logger
-from utils.checkpoints import (
+    Node2GraphDataset)
+from utils import (
+    search_triangles,
     save_checkpoint,
     load_checkpoint,
     get_latest_checkpoint,
-    cleanup_old_checkpoints)
+    cleanup_old_checkpoints,
+    create_logger,
+    format_time)
 import os
-from utils.tools import format_time
 import time
 import gc
 import warnings
@@ -195,7 +194,7 @@ class Pretrainer:
             loader_start_time = time.time()
             for t in range(self.configs.path_sample_times):
                 input_node_idx = torch.unique(triple_paths[t])
-                dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.max_node_per_graph, self.dataset_dict[data_name], input_node_idx)
+                dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.num_neighbors, self.dataset_dict[data_name], input_node_idx)
                 graph = Batch.from_data_list([d for d in dataset]).to(self.device)
                 optimizer.zero_grad()
                 z, z_tan = self.model(graph)
@@ -334,6 +333,5 @@ class Pretrainer:
         datasets = ConcatDataset(datasets)
         sampler = WeightedRandomSampler(weights, num_samples=len(datasets), replacement=True)
         loader = DataLoader(datasets, batch_size=self.configs.batch_size, sampler=sampler,
-                                  num_workers=self.configs.num_workers, persistent_workers=False,
-                            exclude_keys=["y", "original_node_ids", "center_node_idx", "edge_attr"])
+                                  num_workers=self.configs.num_workers, persistent_workers=False)
         return loader
