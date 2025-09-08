@@ -30,7 +30,7 @@ def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Training
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=128,
                         help='Batch size for data loading')
     parser.add_argument('--num_path_samples', type=int, default=100,
                        help='Number of adjacent edge samples')
@@ -80,7 +80,7 @@ def parse_pretrain_config() -> PretrainConfig:
 
     config = PretrainConfig(
         k_hops=args.k_hops,
-        max_node_per_graph=args.max_node_per_graph,
+        num_neighbors=args.num_neighbors,
         root=args.root,
         pretrain_single_graph_data=args.pretrain_single_graph_data,
         pretrain_multi_graph_data=args.pretrain_multi_graph_data,

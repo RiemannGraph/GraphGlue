@@ -12,7 +12,7 @@ class ModelConfig:
     pretrain_multi_graph_data: List[str] = None
     root: str = "./datasets"
     k_hops: int = 2
-    max_node_per_graph: int = 500
+    num_neighbors: Optional[List[int]] = None
     """For Node2Vec, data like KG that without node features"""
     nv_dim: int = 128
     nv_batch_size: int = 128
@@ -61,7 +61,7 @@ def add_model_config(parser: ArgumentParser):
                        help='graph-level pretraining datasets')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
-    parser.add_argument('--max_node_per_graph', type=int, default=100,
+    parser.add_argument('--num_neighbors', type=int, nargs="+", default=[10, 10],
                         help='maximum number of nodes per graph')
 
     # Node2Vec parameters (for KGs without node features)
