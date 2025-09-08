@@ -273,7 +273,7 @@ class RiemannianPrototypeManager(nn.Module):
     """
     def __init__(self, datasets_list: List[str], hid_dim: int, num_generators: int, ema_alpha: float = 0.99, temperature: float = 1.0):
         super().__init__()
-        self.datasets_list = datasets_list
+        self.datasets_list = [re.sub(r'[^a-zA-Z0-9_]', '_', name) for name in datasets_list]
         self.hid_dim = hid_dim
         self.num_generators = num_generators
         self.ema_alpha = ema_alpha

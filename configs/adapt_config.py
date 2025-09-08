@@ -37,12 +37,12 @@ class AdaptionConfig(ModelConfig):
 def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Downstream Adaption Configuration")
 
-    parser.add_argument("--data_name", type=str, default="FB15k_237",
+    parser.add_argument("--data_name", type=str, default="Computers",
                         help="Name of the dataset. [ogbn-arxiv, Computers, Reddit, FB15k_237, PROTEINS, HIV] ")
-    parser.add_argument("--task_type", type=str, default="link_cls", choices=["node_cls", "graph_cls", "link_cls"],
+    parser.add_argument("--task_type", type=str, default="node_cls", choices=["node_cls", "graph_cls", "link_cls"],
                         help="Type of downstream task.")
     parser.add_argument("--pretrained_checkpoint", type=str,
-                        default="checkpoints/ogbn-arxiv_Computers_FB15k_237_PROTEINS_HIV/pretrain_final_model.pth",
+                        default="checkpoints/pretrain/ogbn-arxiv_Computers_FB15k_237_PROTEINS_HIV/pretrain_final_model.pth",
                         help="file path of pretrained model checkpoint.")
     # Task
     parser.add_argument("--k_shot", type=int, default=5,
@@ -53,9 +53,9 @@ def get_pretrain_parser():
                         help="Proportion of validation set.")
 
     # Training
-    parser.add_argument("--align_coef", type=float, default=0.01,
+    parser.add_argument("--align_coef", type=float, default=0.1,
                         help="Coefficient for alignment loss.")
-    parser.add_argument("--batch_size", type=int, default=32,
+    parser.add_argument("--batch_size", type=int, default=64,
                         help="Batch size for task training.")
     parser.add_argument("--lr_task", type=float, default=1e-3,
                         help="Learning rate for task model.")
