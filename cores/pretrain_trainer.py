@@ -161,12 +161,12 @@ class Pretrainer:
             data = data.to(self.device)
             z, z_tan = self.model(data)
             knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-            triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples,
-                                                  self.configs.path_sample_times, return_relabel_mapping=True)
+            triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples_global,
+                                                  self.configs.path_sample_times_global, return_relabel_mapping=True)
             geo_loss = 0.
             for t in range(self.configs.path_sample_times):
                 geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
-            geo_loss /= self.configs.path_sample_times
+            geo_loss /= self.configs.path_sample_times_global
             geo_loss.backward()
             optimizer.step()
 
@@ -190,9 +190,10 @@ class Pretrainer:
         self.logger.info("--------------Refine manifold structure from locality---------------")
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
-            triple_paths, _, _ = search_triangles(data.edge_index, self.configs.num_path_samples, self.configs.path_sample_times, return_relabel_mapping=True)
+            triple_paths, _, _ = search_triangles(data.edge_index, self.configs.num_path_samples_local,
+                                                  self.configs.path_sample_times_local, return_relabel_mapping=True)
             loader_start_time = time.time()
-            for t in range(self.configs.path_sample_times):
+            for t in range(self.configs.path_sample_times_local):
                 input_node_idx = torch.unique(triple_paths[t])
                 dataset = Node2GraphDataset(data, self.configs.k_hops, self.configs.num_neighbors, self.dataset_dict[data_name], input_node_idx)
                 graph = Batch.from_data_list([d for d in dataset]).to(self.device)
@@ -209,7 +210,7 @@ class Pretrainer:
                     self._log_progress(
                         epoch=epoch,
                         batch_idx=t + 1,
-                        dataset_len=self.configs.path_sample_times,
+                        dataset_len=self.configs.path_sample_times_local,
                         loss=geo_loss.item(),
                         start_loader_time=loader_start_time,
                         batches_done=t + 1
@@ -228,12 +229,12 @@ class Pretrainer:
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
                 knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-                triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples,
-                                                      self.configs.path_sample_times, return_relabel_mapping=True)
+                triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples_global,
+                                                      self.configs.path_sample_times_global, return_relabel_mapping=True)
                 geo_loss = 0.
-                for t in range(self.configs.path_sample_times):
+                for t in range(self.configs.path_sample_times_global):
                     geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
-                geo_loss /= self.configs.path_sample_times
+                geo_loss /= self.configs.path_sample_times_global
                 geo_loss.backward()
                 optimizer.step()
 
