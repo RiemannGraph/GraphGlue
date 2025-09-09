@@ -164,7 +164,7 @@ class Pretrainer:
             triple_paths, _, _ = search_triangles(knn_edge_index, self.configs.num_path_samples_global,
                                                   self.configs.path_sample_times_global, return_relabel_mapping=True)
             geo_loss = 0.
-            for t in range(self.configs.path_sample_times):
+            for t in range(self.configs.path_sample_times_global):
                 geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
             geo_loss /= self.configs.path_sample_times_global
             geo_loss.backward()
