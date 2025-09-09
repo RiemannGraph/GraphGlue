@@ -40,6 +40,7 @@ class AdaptTrainer:
         self.task_type = configs.task_type
 
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
+        os.makedirs("./results", exist_ok=True)
 
     def train(self):
         loaders, num_classes, num_features = self.get_loaders(self.configs)
@@ -115,11 +116,22 @@ class AdaptTrainer:
                                             **AdaptTrainer.TASK_CONFIGS[self.task_type],
                                             metric=self.configs.metric)
             self.logger.info("=====================================================")
-            self.logger.info(f'Trial {trial:03d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%')
+            self.logger.info(f'Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%')
             self.logger.info("=====================================================")
             total_metric.append(test_metric)
+            with open(f"./results/{self.configs.data_name}.txt", "a") as f:
+                f.write(f"============={self.configs.k_shot}-Shot {self.configs.task_type}=================\n")
+                f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
+                f.write(f"Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%\n")
+            f.close()
+
         self.logger.info(f'Final Test {self.configs.metric.upper()}: '
                          f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
+        with open(f"./results/{self.configs.data_name}.txt", "a") as f:
+            f.write(f'Final Test {self.configs.metric.upper()}: '
+                         f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
+            f.write("======================================================================\n")
+        f.close()
 
     def _train_epoch(self, train_loader, model, optimizer, trial):
         loss, acc = train_step(train_loader, optimizer, model, self.device,

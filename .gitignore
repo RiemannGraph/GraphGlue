@@ -211,3 +211,4 @@ datasets/
 checkpoints/
 logs/
 scripts/
+results/
