@@ -92,7 +92,7 @@ class Pretrainer:
                 )
 
                 # Optional
-                cleanup_old_checkpoints(self.configs.checkpoint_dir, keep_last=5)
+                cleanup_old_checkpoints(self.configs.checkpoint_dir, keep_last=20)
 
             if (epoch + 1) == self.configs.pretrain_epochs:
                 final_model_path = os.path.join(

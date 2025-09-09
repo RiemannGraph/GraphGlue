@@ -50,6 +50,10 @@ class AdaptTrainer:
 
         # Train loop
         total_metric = []
+        with open(f"./results/{self.configs.data_name}.txt", "a") as f:
+            f.write(f"============={self.configs.k_shot}-Shot {self.configs.task_type}=================\n")
+            f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
+        f.close()
         for trial in range(self.configs.num_trials):
             pretrained_model = RPGraphFM(self.configs)
             load_checkpoint(self.configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
@@ -120,8 +124,6 @@ class AdaptTrainer:
             self.logger.info("=====================================================")
             total_metric.append(test_metric)
             with open(f"./results/{self.configs.data_name}.txt", "a") as f:
-                f.write(f"============={self.configs.k_shot}-Shot {self.configs.task_type}=================\n")
-                f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
                 f.write(f"Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%\n")
             f.close()
 
@@ -129,7 +131,7 @@ class AdaptTrainer:
                          f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
         with open(f"./results/{self.configs.data_name}.txt", "a") as f:
             f.write(f'Final Test {self.configs.metric.upper()}: '
-                         f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
+                         f'{np.mean(total_metric) * 100:.2f} ± {np.std(total_metric) * 100:.2f} %\n')
             f.write("======================================================================\n")
         f.close()
 
