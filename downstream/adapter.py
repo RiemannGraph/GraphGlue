@@ -22,7 +22,6 @@ class RPGPrompt(nn.Module):
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, configs.in_dim)
         self.pretrained_model = pretrained_model
-        self.pretrained_model.eval()
         self.pretrained_model.frozen()
         self.prompt_z = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))
         self.prompt_z_tan = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))

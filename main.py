@@ -1,5 +1,4 @@
-from configs.pretrain_config import parse_pretrain_config
-from configs.adapt_config import parse_adaption_config
+from configs import parse_pretrain_config, parse_adaption_config
 from cores.pretrain_trainer import Pretrainer
 from downstream.adapt_trainer import AdaptTrainer
 

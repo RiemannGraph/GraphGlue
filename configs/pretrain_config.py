@@ -9,8 +9,10 @@ from configs.base_config import ModelConfig, add_model_config, load_config_from_
 class PretrainConfig(ModelConfig):
     # Training
     batch_size: int = 128
-    num_path_samples: int = 100
-    path_sample_times: int = 20
+    num_path_samples_global: int = 100
+    num_path_samples_local: int = 100
+    path_sample_times_global: int = 20
+    path_sample_times_local: int = 500
     pretrain_epochs: int = 100
     lr_pretrain: float = 1e-3
     pretrain_weight_decay: float = 1e-5
@@ -30,13 +32,17 @@ def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Training
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size for data loading')
-    parser.add_argument('--num_path_samples', type=int, default=100,
-                       help='Number of adjacent edge samples')
-    parser.add_argument('--path_sample_times', type=int, default=20,
-                        help='Times of path samples')
-    parser.add_argument('--pretrain_epochs', type=int, default=100,
+    parser.add_argument('--num_path_samples_global', type=int, default=100,
+                       help='Number of triangle samples for global construction')
+    parser.add_argument('--num_path_samples_local', type=int, default=100,
+                        help='Number of triangle samples for local construction')
+    parser.add_argument('--path_sample_times_global', type=int, default=20,
+                        help='Times of path samples for global construction')
+    parser.add_argument('--path_sample_times_local', type=int, default=500,
+                        help='Times of path samples for local construction')
+    parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')
     parser.add_argument('--lr_pretrain', type=float, default=3e-4,
                         help='Learning rate for pretraining')
@@ -117,8 +123,10 @@ def parse_pretrain_config() -> PretrainConfig:
         save_interval=args.save_interval,
         resume_checkpoint=args.resume_checkpoint,
         warmup_epochs=args.warmup_epochs,
-        num_path_samples=args.num_path_samples,
-        path_sample_times=args.path_sample_times,
+        num_path_samples_global=args.num_path_samples_global,
+        num_path_samples_local=args.num_path_samples_local,
+        path_sample_times_global=args.path_sample_times_global,
+        path_sample_times_local=args.path_sample_times_local,
         num_generators=args.num_generators,
     )
 
