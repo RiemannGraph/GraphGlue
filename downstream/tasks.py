@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from downstream.adapter import RPGPrompt
+from sklearn.metrics import roc_auc_score
 
 
 def _forward_pass(model, data):
@@ -10,14 +11,17 @@ def _forward_pass(model, data):
     return pred, align_loss
 
 
-def _compute_metrics(preds_list, trues_list):
+def _compute_metrics(preds_list, trues_list, metric: str = "acc"):
     preds = np.concatenate(preds_list, axis=-1)
     trues = np.concatenate(trues_list, axis=-1)
-    acc = np.sum(preds == trues) / len(preds)
-    return acc
+    if metric == "acc":
+        metric = np.sum(preds == trues) / len(preds)
+    elif metric == "auc":
+        metric = roc_auc_score(trues, preds)
+    return metric
 
 
-def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y'):
+def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y', metric="acc"):
     model.train()
     total_loss = 0.0
     preds_list = []
@@ -39,12 +43,12 @@ def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y'):
         preds_list.append(pred.detach().cpu().numpy().argmax(-1))
         trues_list.append(label.detach().cpu().numpy())
 
-    acc = _compute_metrics(preds_list, trues_list)
+    acc = _compute_metrics(preds_list, trues_list, metric)
     avg_loss = total_loss / len(loader)
     return avg_loss, acc
 
 
-def eval_step(loader, model: RPGPrompt, device, label_attr='y'):
+def eval_step(loader, model: RPGPrompt, device, label_attr='y', metric="acc"):
     model.eval()
     total_loss = 0.0
     preds_list = []
@@ -62,6 +66,6 @@ def eval_step(loader, model: RPGPrompt, device, label_attr='y'):
             preds_list.append(pred.detach().cpu().numpy().argmax(-1))
             trues_list.append(label.detach().cpu().numpy())
 
-    acc = _compute_metrics(preds_list, trues_list)
+    acc = _compute_metrics(preds_list, trues_list, metric)
     avg_loss = total_loss / len(loader)
     return avg_loss, acc

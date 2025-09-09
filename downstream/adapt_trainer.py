@@ -35,18 +35,6 @@ class AdaptTrainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.logger = logger if logger is not None else create_logger(configs.log_path)
 
-        loaders, num_classes, num_features = self.get_loaders(configs)
-        self.train_loaders = loaders[0]
-        self.val_loaders = loaders[1]
-        self.test_loaders = loaders[2]
-
-        pretrained_model = RPGraphFM(configs)
-        load_checkpoint(configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
-        self.model = RPGPrompt(configs, num_features,
-                               pretrained_model, configs.task_type,
-                               num_classes
-                               ).to(self.device)
-
         self.start_epoch = 0
 
         self.task_type = configs.task_type
@@ -54,27 +42,28 @@ class AdaptTrainer:
         os.makedirs(self.configs.checkpoint_dir, exist_ok=True)
 
     def train(self):
-        optimizer = Adam(
-            self.model.parameters(),
-            lr=self.configs.lr_task,
-            weight_decay=self.configs.task_weight_decay
-        )
-        scheduler = CosineAnnealingLR(
-            optimizer,
-            T_max=self.configs.task_epochs,
-            eta_min=self.configs.lr_task * 0.01
-        )
-
-        # Resume
-        if self.configs.resume_checkpoint:
-            latest_ckpt = get_latest_checkpoint(self.configs.checkpoint_dir)
-            if latest_ckpt:
-                self.start_epoch = load_checkpoint(latest_ckpt, self.model, optimizer, scheduler)
-                self.logger.info(f"Resumed from epoch {self.start_epoch}")
+        loaders, num_classes, num_features = self.get_loaders(self.configs)
+        train_loaders = loaders[0]
+        val_loaders = loaders[1]
+        test_loaders = loaders[2]
 
         # Train loop
-        total_acc = []
+        total_metric = []
         for trial in range(self.configs.num_trials):
+            pretrained_model = RPGraphFM(self.configs)
+            load_checkpoint(self.configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
+            model = RPGPrompt(self.configs, num_features, pretrained_model,
+                              self.configs.task_type, num_classes).to(self.device)
+            optimizer = Adam(
+                model.parameters(),
+                lr=self.configs.lr_task,
+                weight_decay=self.configs.task_weight_decay
+            )
+            scheduler = CosineAnnealingLR(
+                optimizer,
+                T_max=self.configs.task_epochs,
+                eta_min=self.configs.lr_task * 0.01
+            )
             early_stopping = EarlyStopping(
                 patience=self.configs.patience,
                 mode='max',
@@ -82,30 +71,31 @@ class AdaptTrainer:
                 checkpoint_dir=self.configs.checkpoint_dir,
                 verbose=True
             )
-            self.model.train()
+            model.train()
             for epoch in range(self.start_epoch, self.configs.task_epochs):
                 epoch_start_time = time.time()
-                train_loss, train_acc = self._train_epoch(optimizer, trial)
+                train_loss, train_metric = self._train_epoch(train_loaders[trial], model, optimizer, trial)
                 scheduler.step()
                 epoch_time = time.time() - epoch_start_time
 
                 self.logger.info(
                     f'Epoch {epoch:03d}/{self.configs.task_epochs} | '
                     f'Train Loss: {train_loss:.6f} | '
-                    f'Train ACC: {train_acc * 100:.2f}% | '
+                    f'Train {self.configs.metric.upper()}: {train_metric * 100:.2f}% | '
                     f'Time: {epoch_time:.2f}s | '
                     f'LR: {optimizer.param_groups[0]["lr"]:.2e}'
                 )
 
                 # Evaluation
                 if (epoch + 1) % self.configs.eval_interval == 0:
-                    val_loss, val_acc = eval_step(self.val_loaders[trial], self.model, self.device,
-                                           **AdaptTrainer.TASK_CONFIGS[self.task_type])
-                    self.logger.info(f'Epoch {epoch:03d} | Val Acc: {val_acc * 100:.2f}%')
+                    val_loss, val_metric = eval_step(val_loaders[trial], model, self.device,
+                                           **AdaptTrainer.TASK_CONFIGS[self.task_type],
+                                                  metric=self.configs.metric)
+                    self.logger.info(f'Epoch {epoch:03d} | Val {self.configs.metric.upper()}: {val_metric * 100:.2f}%')
 
                     if early_stopping.step(
-                            metric=val_acc,
-                            model=self.model,
+                            metric=val_metric,
+                            model=model,
                             optimizer=optimizer,
                             scheduler=scheduler,
                             epoch=epoch,
@@ -115,25 +105,29 @@ class AdaptTrainer:
 
             # Final save
             final_path = os.path.join(self.configs.checkpoint_dir, f'downstream_final_{trial}.pth')
-            torch.save({'state_dict': self.model.state_dict()}, final_path)
+            torch.save({'state_dict': model.state_dict()}, final_path)
             self.logger.info(f"Trial {trial} | Training finished. Final model saved to {final_path}")
 
-            test_loss, test_acc = eval_step(self.test_loaders[trial], self.model, self.device,
-                                            **AdaptTrainer.TASK_CONFIGS[self.task_type])
-            self.logger.info(f'Trial {trial:03d} | Test Acc: {test_acc * 100:.2f}%')
-            total_acc.append(test_acc)
-        self.logger.info(f'Final Test Acc: {np.mean(total_acc) * 100:.2f} \u00B1 {np.std(total_acc) * 100:.2f} %')
+            self.logger.info(f"===========Loading best checkpoint from {self.configs.checkpoint_dir}/model_best.pth===========")
+            load_checkpoint(f"{self.configs.checkpoint_dir}/model_best.pth", model)
+            model.eval()
+            test_loss, test_metric = eval_step(test_loaders[trial], model, self.device,
+                                            **AdaptTrainer.TASK_CONFIGS[self.task_type],
+                                            metric=self.configs.metric)
+            self.logger.info("=====================================================")
+            self.logger.info(f'Trial {trial:03d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%')
+            self.logger.info("=====================================================")
+            total_metric.append(test_metric)
+        self.logger.info(f'Final Test {self.configs.metric.upper()}: '
+                         f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
 
-    def _train_epoch(self, optimizer, trial):
-        loss = None
-        acc = None
-        loss, acc = train_step(self.train_loaders[trial], optimizer, self.model, self.device,
-                               **AdaptTrainer.TASK_CONFIGS[self.task_type])
+    def _train_epoch(self, train_loader, model, optimizer, trial):
+        loss, acc = train_step(train_loader, optimizer, model, self.device,
+                               **AdaptTrainer.TASK_CONFIGS[self.task_type],
+                               metric=self.configs.metric)
         return loss, acc
 
     def get_loaders(self, configs):
-        num_classes = None
-        num_features = None
         train_loaders = []
         val_loaders = []
         test_loaders = []

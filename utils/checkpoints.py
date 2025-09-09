@@ -121,7 +121,7 @@ def load_checkpoint(
         if map_location is None:
             map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        checkpoint_dict = torch.load(filepath, map_location=map_location)
+        checkpoint_dict = torch.load(filepath, map_location=map_location, weights_only=False)
         logger.info(f"Checkpoint loaded from {filepath}")
 
         ckpt = TrainerCheckpoint.from_dict(checkpoint_dict)

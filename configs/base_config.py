@@ -54,10 +54,10 @@ def add_model_config(parser: ArgumentParser):
     group = parser.add_argument_group("Model Architecture")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                       default=["ogbn-arxiv", "Computers", "FB15k_237"],
+                       default=["ogbn-arxiv", "Reddit", "Computers", "FB15k_237"],
                        help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
-                       default=["PROTEINS", "HIV"],
+                       default=["PROTEINS"],
                        help='graph-level pretraining datasets')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
