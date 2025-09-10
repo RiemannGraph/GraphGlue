@@ -343,7 +343,7 @@ class RiemannianPrototypeManager(nn.Module):
         """
         Get all prototypes as stacked tensors.
         Returns:
-            (names, all_z: [N, d], all_z_tan: [N, d])
+            (names, all_z: [N, d], all_z_tan: [N, M, d])
         """
         names = [name for name in self.datasets_list if name in self.prototype_keys]
         all_z = torch.stack([self._proto_z_dict[name] for name in names], dim=0)
