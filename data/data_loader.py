@@ -193,7 +193,7 @@ class Node2GraphDataset(Dataset):
         """
         super(Node2GraphDataset, self).__init__()
         assert len(num_neighbors) == k_hops, "sampling neighbor hops should be equal to k_hops"
-        self.data = data
+        self.data = data.clone()
         self.k_hops = k_hops
         self.input_node_idx = input_node_idx if input_node_idx is not None else torch.arange(data.num_nodes)
         self.data_name_map = data_name_map

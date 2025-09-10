@@ -1,3 +1,4 @@
+import torch
 from configs import parse_pretrain_config, parse_adaption_config
 from cores.pretrain_trainer import Pretrainer
 from downstream.adapt_trainer import AdaptTrainer
@@ -21,7 +22,7 @@ def main():
 
     trainer = AdaptTrainer(config)
     trainer.train()
-
+    torch.cuda.empty_cache()
 
 
 if __name__ == '__main__':
