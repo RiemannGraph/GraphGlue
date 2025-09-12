@@ -139,7 +139,7 @@ class RPGraphFM(nn.Module):
 
             log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
             log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
-            log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
+            log_r_matrix = torch.concat([log_r_matrix_ij, log_r_matrix_jk], dim=-1)  # [2T]
 
             geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
         else:
@@ -249,6 +249,18 @@ class RPGraphFM(nn.Module):
         return P
 
     @staticmethod
+    def log_volume(basis):
+        """
+        Log volume of metric tensor w.r.t. the standard basis.
+        :param basis: [*, M, d]
+        :return:
+        """
+        vol = torch.det(basis @ basis.transpose(-1, -2))  # [M, M]
+        abs_vol_stable = torch.sqrt(vol ** 2 + EPS)
+        log_vol_stable = torch.log(abs_vol_stable)
+        return log_vol_stable
+
+    @staticmethod
     def log_volume_ratio(basis_src, basis_dst):
         """
         Volume ratio between two tangent spaces to estimate Ricci Curvature.
@@ -257,11 +269,9 @@ class RPGraphFM(nn.Module):
 
         :return: log ratio: torch.Tensor
         """
-        vol_src, vol_dst = torch.det(basis_src.transpose(-1, -2) @ basis_src), torch.det(basis_dst.transpose(-1, -2) @ basis_dst)
-        abs_vol_src_stable = torch.sqrt(vol_src ** 2 + EPS)
-        abs_vol_dst_stable = torch.sqrt(vol_dst ** 2 + EPS)
-        log_r = torch.log(abs_vol_dst_stable) - torch.log(abs_vol_src_stable)
-        return log_r
+        log_vol_src, log_vol_dst = RPGraphFM.log_volume(basis_src), RPGraphFM.log_volume(basis_dst)
+        log_ratio = log_vol_src - log_vol_dst
+        return log_ratio
 
 
 class RiemannianPrototypeManager(nn.Module):
