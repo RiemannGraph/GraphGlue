@@ -255,9 +255,8 @@ class RPGraphFM(nn.Module):
         :param basis: [*, M, d]
         :return:
         """
-        vol = torch.det(basis @ basis.transpose(-1, -2))  # [M, M]
-        abs_vol_stable = torch.sqrt(vol ** 2 + EPS)
-        log_vol_stable = torch.log(abs_vol_stable)
+        metric = basis @ basis.transpose(-1, -2)  # [M, M]
+        log_vol_stable = torch.logdet(metric)
         return log_vol_stable
 
     @staticmethod
