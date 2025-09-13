@@ -51,10 +51,10 @@ class GeometricPersistLoss(nn.Module):
         """
         In order of (i,j) (j,k) (i,k)
         :param pt_matrix: Parallel Translation matrix with shape [3, T, d, d]
-        :param log_r_matrix: Log Volume Ratio matrix with shape [2T]
+        :param log_r_matrix: Log Volume Ratio matrix with shape [2, T]
         :return: geometric persistent loss
         """
         pt_loss = torch.frobenius_norm(pt_matrix[1] @ pt_matrix[0] - pt_matrix[2], dim=[1, 2]).mean()
-        curv_loss = torch.mean(log_r_matrix ** 2)
+        curv_loss = torch.mean((log_r_matrix[0] - log_r_matrix[1]) ** 2)
         return self.geo_regular_coef * (pt_loss + curv_loss)
 

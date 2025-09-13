@@ -139,7 +139,7 @@ class RPGraphFM(nn.Module):
 
             log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
             log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
-            log_r_matrix = torch.concat([log_r_matrix_ij, log_r_matrix_jk], dim=-1)  # [2T]
+            log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
 
             geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
         else:
