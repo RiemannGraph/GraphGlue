@@ -7,6 +7,7 @@ from torch_geometric.utils import to_undirected, remove_self_loops
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
+from utils.math import log_volume_ratio, matrix_log_sym, parallel_translation
 from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
 
@@ -132,13 +133,13 @@ class RPGraphFM(nn.Module):
         if triple_paths.numel() > 0:
             vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
             z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
-            pt_matrix_ij = self.parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
-            pt_matrix_jk = self.parallel_translation(z_tan_j, z_tan_k)
-            pt_matrix_ik = self.parallel_translation(z_tan_i, z_tan_k)
+            pt_matrix_ij = parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
+            pt_matrix_jk = parallel_translation(z_tan_j, z_tan_k)
+            pt_matrix_ik = parallel_translation(z_tan_i, z_tan_k)
             pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
 
-            log_r_matrix_ij = self.log_volume_ratio(z_tan_i, z_tan_j)  # [T]
-            log_r_matrix_jk = self.log_volume_ratio(z_tan_j, z_tan_k)
+            log_r_matrix_ij = log_volume_ratio(z_tan_i, z_tan_j)  # [T]
+            log_r_matrix_jk = log_volume_ratio(z_tan_j, z_tan_k)
             log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
 
             geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
@@ -149,29 +150,29 @@ class RPGraphFM(nn.Module):
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
         proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')
-        proto_z_tan_pattern = re.compile(r'^prototype_manager\.proto_z_tan_([a-zA-Z0-9_]+)$')
+        proto_metric_pattern = re.compile(r'^prototype_manager\.proto_metric_([a-zA-Z0-9_]+)$')
         datasets_to_register = set()
 
         for key in state_dict.keys():
             match_z = proto_z_pattern.match(key)
-            match_tan = proto_z_tan_pattern.match(key)
+            match_metric = proto_metric_pattern.match(key)
 
             if match_z:
                 datasets_to_register.add(match_z.group(1))  # e.g., 'Computers'
-            elif match_tan:
-                datasets_to_register.add(match_tan.group(1))  # e.g., 'Computers'
+            elif match_metric:
+                datasets_to_register.add(match_metric.group(1))  # e.g., 'Computers'
 
         for safe_name in datasets_to_register:
             z_key = f'prototype_manager.proto_z_{safe_name}'
-            tan_key = f'prototype_manager.proto_z_tan_{safe_name}'
+            tan_key = f'prototype_manager.proto_metric_{safe_name}'
 
             if not hasattr(self.prototype_manager, f'proto_z_{safe_name}'):
                 z_tensor = state_dict[z_key].clone()
                 self.prototype_manager.register_buffer(f'proto_z_{safe_name}', z_tensor)
 
-            if not hasattr(self.prototype_manager, f'proto_z_tan_{safe_name}'):
+            if not hasattr(self.prototype_manager, f'proto_metric_{safe_name}'):
                 tan_tensor = state_dict[tan_key].clone()
-                self.prototype_manager.register_buffer(f'proto_z_tan_{safe_name}', tan_tensor)
+                self.prototype_manager.register_buffer(f'proto_metric_{safe_name}', tan_tensor)
 
         super().load_state_dict(state_dict, strict=strict)
         self.prototype_manager.rebuild_cache_from_buffers()
@@ -234,44 +235,6 @@ class RPGraphFM(nn.Module):
 
         return edge_index, edge_weight
 
-    @staticmethod
-    def parallel_translation(basis_src, basis_dst):
-        """
-        Estimation of parallel translation between two tangent spaces.
-        :param basis_src: [*, M, d]
-        :param basis_dst: [*, M, d]
-
-        :return: PT matrix: torch.Tensor
-        """
-        g = basis_src @ basis_src.transpose(-1, -2)
-        x = basis_src @ basis_dst.transpose(-1, -2)
-        P = torch.linalg.solve(g, x)
-        return P
-
-    @staticmethod
-    def log_volume(basis):
-        """
-        Log volume of metric tensor w.r.t. the standard basis.
-        :param basis: [*, M, d]
-        :return:
-        """
-        metric = basis @ basis.transpose(-1, -2)  # [M, M]
-        log_vol_stable = torch.logdet(metric)
-        return log_vol_stable
-
-    @staticmethod
-    def log_volume_ratio(basis_src, basis_dst):
-        """
-        Volume ratio between two tangent spaces to estimate Ricci Curvature.
-        :param basis_src: [*, M, d]
-        :param basis_dst: [*, M, d]
-
-        :return: log ratio: torch.Tensor
-        """
-        log_vol_src, log_vol_dst = RPGraphFM.log_volume(basis_src), RPGraphFM.log_volume(basis_dst)
-        log_ratio = log_vol_src - log_vol_dst
-        return log_ratio
-
 
 class RiemannianPrototypeManager(nn.Module):
     """
@@ -290,7 +253,7 @@ class RiemannianPrototypeManager(nn.Module):
 
         # Runtime caches (not saved in state_dict)
         self._proto_z_dict: Dict[str, torch.Tensor] = {}        # dataset_name -> tensor (on device)
-        self._proto_z_tan_dict: Dict[str, torch.Tensor] = {}    # dataset_name -> tensor (on device)
+        self._proto_metric_dict: Dict[str, torch.Tensor] = {}    # dataset_name -> tensor (on device)
         self.prototype_keys: List[str] = []  # ordered list of dataset names
 
         # For safety: keep a mapping from sanitized name to original
@@ -302,21 +265,24 @@ class RiemannianPrototypeManager(nn.Module):
         Update or initialize prototype for a dataset using EMA.
         """
         dataset_idx = torch.unique(data_name_map).cpu().numpy()
+        metrics = z_tan @ z_tan.transpose(-1, -2)   # [N, M, M]
+        log_metric = matrix_log_sym(metrics)
         z_mean = scatter_mean(z, data_name_map, dim=0)
-        z_tan_mean = scatter_mean(z_tan, data_name_map, dim=0)
+        log_metric_mean = scatter_mean(log_metric, data_name_map, dim=0)    # [K, M, M]
         for i, dataset_name in enumerate([self.datasets_list[idx] for idx in dataset_idx]):
             if dataset_name not in self._proto_z_dict:
-                self._register_new_prototype(dataset_name, z_mean[i], z_tan_mean[i])
+                self._register_new_prototype(dataset_name, z_mean[i], log_metric_mean[i])
             else:
                 alpha = self.ema_alpha
                 proto_z = self._proto_z_dict[dataset_name]
-                proto_z_tan = self._proto_z_tan_dict[dataset_name]
+                proto_metric = self._proto_metric_dict[dataset_name]
+                log_new_metric = alpha * matrix_log_sym(proto_metric) + (1 - alpha) * log_metric_mean[i]
 
                 # In-place EMA update
                 proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean[i])
-                proto_z_tan.copy_(alpha * proto_z_tan + (1 - alpha) * z_tan_mean[i])
+                proto_metric.copy_(torch.linalg.matrix_exp(log_new_metric))
 
-    def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, z_tan_mean: torch.Tensor):
+    def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, log_metric_mean: torch.Tensor):
         """
         Register a new prototype as buffer and update caches.
         """
@@ -324,16 +290,16 @@ class RiemannianPrototypeManager(nn.Module):
 
         # Clone and detach
         p_z = z_mean.detach().clone()
-        p_z_tan = z_tan_mean.detach().clone()
+        p_metric = torch.linalg.matrix_exp(log_metric_mean.detach().clone())
 
         # Register as persistent buffers
         self.register_buffer(f'proto_z_{safe_name}', p_z)
-        self.register_buffer(f'proto_z_tan_{safe_name}', p_z_tan)
+        self.register_buffer(f'proto_metric_{safe_name}', p_metric)
 
         # Cache original name -> tensor
         # Note: getattr is safe here because we just registered it
         self._proto_z_dict[dataset_name] = getattr(self, f'proto_z_{safe_name}')
-        self._proto_z_tan_dict[dataset_name] = getattr(self, f'proto_z_tan_{safe_name}')
+        self._proto_metric_dict[dataset_name] = getattr(self, f'proto_metric_{safe_name}')
 
         if dataset_name not in self.prototype_keys:
             self.prototype_keys.append(dataset_name)
@@ -345,19 +311,19 @@ class RiemannianPrototypeManager(nn.Module):
         """
         return (
             self._proto_z_dict.get(dataset_name),
-            self._proto_z_tan_dict.get(dataset_name)
+            self._proto_metric_dict.get(dataset_name)
         )
 
     def get_all_prototypes(self) -> Tuple[List[str], Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
         Get all prototypes as stacked tensors.
         Returns:
-            (names, all_z: [N, d], all_z_tan: [N, M, d])
+            (names, all_z: [K, d], all_metric: [K, M, M])
         """
         names = [name for name in self.datasets_list if name in self.prototype_keys]
         all_z = torch.stack([self._proto_z_dict[name] for name in names], dim=0)
-        all_z_tan = torch.stack([self._proto_z_tan_dict[name] for name in names], dim=0)
-        return names, all_z, all_z_tan
+        all_metric = torch.stack([self._proto_metric_dict[name] for name in names], dim=0)
+        return names, all_z, all_metric
 
     def loss(self, z: torch.Tensor, data_name_map: torch.Tensor) -> torch.Tensor:
         """
@@ -378,12 +344,12 @@ class RiemannianPrototypeManager(nn.Module):
         Called by parent module after loading state_dict.
         """
         self._proto_z_dict.clear()
-        self._proto_z_tan_dict.clear()
+        self._proto_metric_dict.clear()
         self.prototype_keys.clear()
         self._sanitized_to_original.clear()
 
         prefix = 'proto_z_'
-        tan_prefix = 'proto_z_tan_'
+        tan_prefix = 'proto_metric_'
 
         for name, buffer in self.named_buffers():
             if name.startswith(prefix) and not name.startswith(tan_prefix):
@@ -403,7 +369,7 @@ class RiemannianPrototypeManager(nn.Module):
                     raise RuntimeError(f"Missing tangent prototype buffer: {tan_name}")
 
                 self._proto_z_dict[original_name] = z_buf
-                self._proto_z_tan_dict[original_name] = z_tan_buf
+                self._proto_metric_dict[original_name] = z_tan_buf
                 if original_name not in self.prototype_keys:
                     self.prototype_keys.append(original_name)
                     self._sanitized_to_original[safe_name] = original_name
