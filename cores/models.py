@@ -7,7 +7,7 @@ from torch_geometric.utils import to_undirected, remove_self_loops
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
-from utils.math import log_volume_ratio, matrix_log_sym, parallel_translation
+from utils.math import log_volume_ratio, matrix_log_sym, parallel_translation, metric
 from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
 
@@ -133,9 +133,9 @@ class RPGraphFM(nn.Module):
         if triple_paths.numel() > 0:
             vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
             z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
-            pt_matrix_ij = parallel_translation(z_tan_i, z_tan_j)    # [T, d, d]
-            pt_matrix_jk = parallel_translation(z_tan_j, z_tan_k)
-            pt_matrix_ik = parallel_translation(z_tan_i, z_tan_k)
+            pt_matrix_ij = parallel_translation(metric(z_tan_i), metric(z_tan_j))    # [T, d, d]
+            pt_matrix_jk = parallel_translation(metric(z_tan_j), metric(z_tan_k))
+            pt_matrix_ik = parallel_translation(metric(z_tan_i), metric(z_tan_k))
             pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
 
             log_r_matrix_ij = log_volume_ratio(z_tan_i, z_tan_j)  # [T]

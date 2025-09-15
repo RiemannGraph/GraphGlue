@@ -21,14 +21,17 @@ def matrix_log_sym(G: torch.Tensor) -> torch.Tensor:
     return log_G
 
 
+def metric(basis: torch.Tensor) -> torch.Tensor:
+    return basis @ basis.transpose(-1, -2)
+
+
 def log_volume(basis):
     """
     Log volume of metric tensor w.r.t. the standard basis.
     :param basis: [*, M, d]
     :return:
     """
-    metric = basis @ basis.transpose(-1, -2)  # [M, M]
-    log_vol_stable = torch.logdet(metric)
+    log_vol_stable = torch.logdet(metric(basis).clamp(min=EPS))
     return log_vol_stable
 
 
@@ -45,35 +48,29 @@ def log_volume_ratio(basis_src, basis_dst):
     return log_ratio
 
 
-def parallel_translation(basis_src: torch.Tensor, basis_dst: torch.Tensor) -> torch.Tensor:
+def parallel_translation(G_i: torch.Tensor, G_j: torch.Tensor) -> torch.Tensor:
     """
     Compute the optimal isometric parallel transport map P such that:
         P^T @ Gj @ P = Gi
-    using the closed-form solution from matrix geometry.
+    using SVD for improved numerical stability.
 
     Args:
-        basis_src (torch.Tensor): Tangent basis at node i, shape (N, M, d)
-        basis_dst (torch.Tensor): Tangent basis at node j, shape (N, M, d)
+        G_i (torch.Tensor): Metric tensor at node i, shape (..., M, M)
+        G_j (torch.Tensor): Metric tensor at node j, shape (..., M, M)
 
     Returns:
-        P (torch.Tensor): Optimal parallel transport map, shape (N, M, M)
-                         such that P^T @ G_j @ P = G_i
+        P (torch.Tensor): Optimal parallel transport map, shape (..., M, M)
     """
-    G_i = basis_src @ basis_src.transpose(-1, -2)
-    G_j = basis_dst @ basis_dst.transpose(-1, -2)
+    S_j, U_j = torch.linalg.eigh(G_j)
+    S_j = torch.clamp(S_j, min=EPS)
+    G_j_inv_sqrt = U_j @ torch.diag_embed(1.0 / torch.sqrt(S_j)) @ U_j.transpose(-2, -1)
 
-    def safe_sqrt_inv(M):
-        eigvals, eigvecs = torch.linalg.eigh(M)
-        eigvals_clamped = torch.clamp(eigvals, min=EPS)
-        sqrt_M = eigvecs @ torch.diag_embed(torch.sqrt(eigvals_clamped)) @ eigvecs.transpose(-1, -2)
-        inv_sqrt_M = eigvecs @ torch.diag_embed(1.0 / torch.sqrt(eigvals_clamped)) @ eigvecs.transpose(-1, -2)
-        return sqrt_M, inv_sqrt_M
-
-    G_j_sqrt, G_j_inv_sqrt = safe_sqrt_inv(G_j)
-
+    G_j_sqrt = U_j @ torch.diag_embed(torch.sqrt(S_j)) @ U_j.transpose(-2, -1)
     A = G_j_sqrt @ G_i @ G_j_sqrt
 
-    A_sqrt, _ = safe_sqrt_inv(A)
+    S_A, U_A = torch.linalg.eigh(A)
+    S_A = torch.clamp(S_A, min=EPS)
+    A_sqrt = U_A @ torch.diag_embed(torch.sqrt(S_A)) @ U_A.transpose(-2, -1)
 
     P = G_j_inv_sqrt @ A_sqrt @ G_j_inv_sqrt
 
