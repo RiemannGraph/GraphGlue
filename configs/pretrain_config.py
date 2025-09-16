@@ -60,7 +60,7 @@ def get_pretrain_parser():
                         help="Number of warmup epochs to compute prototype loss")
 
     # Config IO
-    parser.add_argument('--save_config', action="store_false",
+    parser.add_argument('--save_config', action="store_true",
                         help='Whether to save current config as YAML (optional)')
     parser.add_argument('--config_load_path', type=str, default=None,
                         help='Path to load config from YAML (optional, will override cmd args)')
