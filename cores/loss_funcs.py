@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
+EPS = 1e-6
+
 
 class PTGBLoss(nn.Module):
     def __init__(self, num_generators, temperature: int = 1.0):
@@ -14,10 +16,10 @@ class PTGBLoss(nn.Module):
         :param z_tan: [N, M, d]
         :return: loss
         """
-        sim = torch.exp(self.alpha) * -torch.norm(z_tan, dim=-1, p=2)  # [N, M]
-        sim = torch.exp(sim / self.temperature)
-        div = torch.sum(sim, dim=-1, keepdim=True)
-        loss = torch.mean(-torch.log(sim / (div + 1e-6)))
+        sim = torch.exp(self.alpha) * -torch.norm(z_tan, dim=-1, p=2) ** 2  # [N, M]
+        sim = torch.exp(sim / self.temperature) + EPS
+        div = torch.sum(sim, dim=-1, keepdim=True) + EPS
+        loss = torch.mean(-torch.log(sim / div))
         return loss
 
 
@@ -50,11 +52,11 @@ class GeometricPersistLoss(nn.Module):
     def forward(self, pt_matrix, log_r_matrix):
         """
         In order of (i,j) (j,k) (i,k)
-        :param pt_matrix: Parallel Translation matrix with shape [3, T, d, d]
+        :param pt_matrix: Parallel Translation matrix with shape [3, T, M]
         :param log_r_matrix: Log Volume Ratio matrix with shape [2, T]
         :return: geometric persistent loss
         """
-        pt_loss = torch.frobenius_norm(pt_matrix[1] @ pt_matrix[0] - pt_matrix[2], dim=[1, 2]).mean()
+        pt_loss = torch.mean(torch.norm(pt_matrix[1] * pt_matrix[0] - pt_matrix[2], p=2, dim=-1) ** 2)
         curv_loss = torch.mean((log_r_matrix[0] - log_r_matrix[1]) ** 2)
         return self.geo_regular_coef * (pt_loss + curv_loss)
 

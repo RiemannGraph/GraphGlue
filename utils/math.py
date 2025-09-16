@@ -1,52 +1,55 @@
 import torch
 
 EPS = 1e-6
-EIGVAL_CLAMP_MIN = 1e-5
+MAX = 50
 
 
-def safe_symmetrize(A: torch.Tensor) -> torch.Tensor:
-    return 0.5 * (A + A.transpose(-2, -1))
-
-
-def matrix_log_sym(G: torch.Tensor) -> torch.Tensor:
+def diagonal_metric(basis: torch.Tensor) -> torch.Tensor:
     """
-    Compute the matrix logarithm for a batch of symmetric positive definite matrices.
-    Uses eigenvalue decomposition with robust numerical safeguards.
+
+    :param basis: The basis vectors with shape [*, M ,d]
+    :return: diagonal metric: [*, M]
+    """
+    return torch.sum(basis * basis, dim=-1)
+
+
+def matrix_log_diag(diag_G: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the matrix logarithm for a batch of diagonal positive definite matrices.
+    Uses eigenvalue decomposition for numerical stability.
 
     Args:
-    G: Tensor of shape [*, M, M], symmetric positive definite.
+        diag_G: Tensor of shape [*, M], diagonal positive definite.
 
     Returns:
         Log(G): Tensor of same shape as G.
     """
-    G = safe_symmetrize(G)
-    try:
-        eigvals, eigvecs = torch.linalg.eigh(G)
-        eigvals = torch.clamp(eigvals, min=EIGVAL_CLAMP_MIN)
-        log_eigvals = torch.log(eigvals)
-        log_G = eigvecs @ torch.diag_embed(log_eigvals) @ eigvecs.transpose(-2, -1)
-    except Exception as e:
-        print(f"[WARNING] matrix_log_sym failed. Returning zero matrix. Error: {e}")
-        log_G = torch.zeros_like(G)
+    return torch.log(diag_G.clamp(min=EPS))
 
-    if torch.isnan(log_G).any() or torch.isinf(log_G).any():
-        print("[WARNING] NaN/Inf in matrix_log_sym. Returning zero matrix.")
-        log_G = torch.zeros_like(G)
 
-    return log_G
+def matrix_exp_diag(diag_G: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the matrix logarithm for a batch of diagonal positive definite matrices.
+    Uses eigenvalue decomposition for numerical stability.
 
-def metric(basis: torch.Tensor) -> torch.Tensor:
-    return basis @ basis.transpose(-1, -2)
+    Args:
+        diag_G: Tensor of shape [*, M], diagonal positive definite.
+
+    Returns:
+        Log(G): Tensor of same shape as G.
+    """
+    return torch.exp(diag_G.clamp(max=MAX))
 
 
 def log_volume(basis):
     """
     Log volume of metric tensor w.r.t. the standard basis.
     :param basis: [*, M, d]
-    :return:
+    :return: [*]
     """
-    log_vol_stable = torch.logdet(metric(basis).clamp(min=EPS))
-    return log_vol_stable
+    diag_G = diagonal_metric(basis)
+    log_vol = torch.sum(torch.log(diag_G.clamp(min=EPS)), dim=-1)
+    return log_vol
 
 
 def log_volume_ratio(basis_src, basis_dst):
@@ -64,46 +67,16 @@ def log_volume_ratio(basis_src, basis_dst):
 
 def parallel_translation(G_i: torch.Tensor, G_j: torch.Tensor) -> torch.Tensor:
     """
-    Compute the optimal isometric parallel transport map P: P^T G_j P = G_i.
-    Uses SVD with numerical safeguards to prevent NaN in backward pass.
+    Compute the optimal isometric parallel transport map P such that:
+        P^T @ Gj @ P = Gi
+    Just for diagonal metric tensor
 
     Args:
-    G_i (torch.Tensor): Metric tensor at node i, shape (..., M, M)
-    G_j (torch.Tensor): Metric tensor at node j, shape (..., M, M)
+        G_i (torch.Tensor): Metric tensor at node i, shape (*, M)
+        G_j (torch.Tensor): Metric tensor at node j, shape (*, M)
+
+    Returns:
+        P (torch.Tensor): Optimal parallel transport map, shape (*, M)
     """
-    G_i = safe_symmetrize(G_i)
-    G_j = safe_symmetrize(G_j)
-
-    try:
-        S_j, U_j = torch.linalg.eigh(G_j)
-        S_j = torch.clamp(S_j, min=EIGVAL_CLAMP_MIN)
-        S_j_inv_sqrt = 1.0 / torch.sqrt(S_j)
-        G_j_inv_sqrt = U_j @ torch.diag_embed(S_j_inv_sqrt) @ U_j.transpose(-2, -1)
-    except Exception as e:
-        print(f"[WARNING] eigh failed on G_j. Returning Identity. Error: {e}")
-        I = torch.eye(G_j.shape[-1], device=G_j.device, dtype=G_j.dtype).expand_as(G_j)
-        return I
-
-    S_j_sqrt = torch.sqrt(S_j)
-    G_j_sqrt = U_j @ torch.diag_embed(S_j_sqrt) @ U_j.transpose(-2, -1)
-    A = G_j_sqrt @ G_i @ G_j_sqrt
-    A = safe_symmetrize(A)
-
-    try:
-        S_A, U_A = torch.linalg.eigh(A)
-        S_A = torch.clamp(S_A, min=EIGVAL_CLAMP_MIN)
-        S_A_sqrt = torch.sqrt(S_A)
-        A_sqrt = U_A @ torch.diag_embed(S_A_sqrt) @ U_A.transpose(-2, -1)
-    except Exception as e:
-        print(f"[WARNING] eigh failed on A. Returning Identity. Error: {e}")
-        I = torch.eye(G_j.shape[-1], device=G_j.device, dtype=G_j.dtype).expand_as(G_j)
-        return I
-
-    P = G_j_inv_sqrt @ A_sqrt @ G_j_inv_sqrt
-
-    if torch.isnan(P).any() or torch.isinf(P).any():
-        print("[WARNING] NaN/Inf detected in P. Returning Identity.")
-        I = torch.eye(P.shape[-1], device=P.device, dtype=P.dtype).expand_as(P)
-        P = I
-
+    P = torch.sqrt(G_i / G_j.clamp(min=EPS))  # [*, M]
     return P

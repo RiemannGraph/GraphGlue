@@ -7,7 +7,7 @@ from torch_geometric.utils import to_undirected, remove_self_loops
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
-from utils.math import log_volume_ratio, matrix_log_sym, parallel_translation, metric
+from utils.math import log_volume_ratio, matrix_log_diag, matrix_exp_diag, parallel_translation, diagonal_metric
 from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
 
@@ -115,6 +115,8 @@ class RPGraphFM(nn.Module):
             z_aug.append(tan)
         z_aug = torch.stack(z_aug, dim=1)
         z_tan = z_aug - z.unsqueeze(1)
+        tan_norm = torch.norm(z_tan, p=2, dim=-1, keepdim=True) # [N, M, 1]
+        z_tan = torch.linalg.qr(z_tan.transpose(-1, -2))[0].transpose(-1, -2) * tan_norm
         return z, z_tan
 
     def local_struct_loss(self, z, z_tan):
@@ -133,10 +135,10 @@ class RPGraphFM(nn.Module):
         if triple_paths.numel() > 0:
             vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
             z_tan_i, z_tan_j, z_tan_k = z_tan[vi], z_tan[vj], z_tan[vk]
-            pt_matrix_ij = parallel_translation(metric(z_tan_i), metric(z_tan_j))    # [T, d, d]
-            pt_matrix_jk = parallel_translation(metric(z_tan_j), metric(z_tan_k))
-            pt_matrix_ik = parallel_translation(metric(z_tan_i), metric(z_tan_k))
-            pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, d, d]
+            pt_matrix_ij = parallel_translation(diagonal_metric(z_tan_i), diagonal_metric(z_tan_j))    # [T, M]
+            pt_matrix_jk = parallel_translation(diagonal_metric(z_tan_j), diagonal_metric(z_tan_k))
+            pt_matrix_ik = parallel_translation(diagonal_metric(z_tan_i), diagonal_metric(z_tan_k))
+            pt_matrix = torch.stack([pt_matrix_ij, pt_matrix_jk, pt_matrix_ik], dim=0)    # [3, T, M]
 
             log_r_matrix_ij = log_volume_ratio(z_tan_i, z_tan_j)  # [T]
             log_r_matrix_jk = log_volume_ratio(z_tan_j, z_tan_k)
@@ -265,10 +267,10 @@ class RiemannianPrototypeManager(nn.Module):
         Update or initialize prototype for a dataset using EMA.
         """
         dataset_idx = torch.unique(data_name_map).cpu().numpy()
-        metrics = z_tan @ z_tan.transpose(-1, -2)   # [N, M, M]
-        log_metric = matrix_log_sym(metrics)
+        metric = diagonal_metric(z_tan)   # [N, M]
+        log_metric = matrix_log_diag(metric)    # [N, M]
         z_mean = scatter_mean(z, data_name_map, dim=0)
-        log_metric_mean = scatter_mean(log_metric, data_name_map, dim=0)    # [K, M, M]
+        log_metric_mean = scatter_mean(log_metric, data_name_map, dim=0)    # [K, M]
         for i, dataset_name in enumerate([self.datasets_list[idx] for idx in dataset_idx]):
             if dataset_name not in self._proto_z_dict:
                 self._register_new_prototype(dataset_name, z_mean[i], log_metric_mean[i])
@@ -276,11 +278,11 @@ class RiemannianPrototypeManager(nn.Module):
                 alpha = self.ema_alpha
                 proto_z = self._proto_z_dict[dataset_name]
                 proto_metric = self._proto_metric_dict[dataset_name]
-                log_new_metric = alpha * matrix_log_sym(proto_metric) + (1 - alpha) * log_metric_mean[i]
+                log_new_metric = alpha * matrix_log_diag(proto_metric) + (1 - alpha) * log_metric_mean[i]
 
                 # In-place EMA update
                 proto_z.copy_(alpha * proto_z + (1 - alpha) * z_mean[i])
-                proto_metric.copy_(torch.linalg.matrix_exp(log_new_metric))
+                proto_metric.copy_(matrix_exp_diag(log_new_metric))
 
     def _register_new_prototype(self, dataset_name: str, z_mean: torch.Tensor, log_metric_mean: torch.Tensor):
         """
@@ -290,7 +292,7 @@ class RiemannianPrototypeManager(nn.Module):
 
         # Clone and detach
         p_z = z_mean.detach().clone()
-        p_metric = torch.linalg.matrix_exp(log_metric_mean.detach().clone())
+        p_metric = matrix_exp_diag(log_metric_mean.detach().clone())
 
         # Register as persistent buffers
         self.register_buffer(f'proto_z_{safe_name}', p_z)
