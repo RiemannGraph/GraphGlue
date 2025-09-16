@@ -20,11 +20,18 @@ def matrix_log_sym(G: torch.Tensor) -> torch.Tensor:
         Log(G): Tensor of same shape as G.
     """
     G = safe_symmetrize(G)
+    try:
+        eigvals, eigvecs = torch.linalg.eigh(G)
+        eigvals = torch.clamp(eigvals, min=EIGVAL_CLAMP_MIN)
+        log_eigvals = torch.log(eigvals)
+        log_G = eigvecs @ torch.diag_embed(log_eigvals) @ eigvecs.transpose(-2, -1)
+    except Exception as e:
+        print(f"[WARNING] matrix_log_sym failed. Returning zero matrix. Error: {e}")
+        log_G = torch.zeros_like(G)
 
-    eigvals, eigvecs = torch.linalg.eigh(G)
-    eigvals = torch.clamp(eigvals, min=EIGVAL_CLAMP_MIN)
-    log_eigvals = torch.log(eigvals)
-    log_G = eigvecs @ torch.diag_embed(log_eigvals) @ eigvecs.transpose(-2, -1)
+    if torch.isnan(log_G).any() or torch.isinf(log_G).any():
+        print("[WARNING] NaN/Inf in matrix_log_sym. Returning zero matrix.")
+        log_G = torch.zeros_like(G)
 
     return log_G
 
@@ -67,21 +74,36 @@ def parallel_translation(G_i: torch.Tensor, G_j: torch.Tensor) -> torch.Tensor:
     G_i = safe_symmetrize(G_i)
     G_j = safe_symmetrize(G_j)
 
-    S_j, U_j = torch.linalg.eigh(G_j)
-    S_j = torch.clamp(S_j, min=EIGVAL_CLAMP_MIN)
-    S_j_inv_sqrt = 1.0 / torch.sqrt(S_j)
-    G_j_inv_sqrt = U_j @ torch.diag_embed(S_j_inv_sqrt) @ U_j.transpose(-2, -1)
+    try:
+        S_j, U_j = torch.linalg.eigh(G_j)
+        S_j = torch.clamp(S_j, min=EIGVAL_CLAMP_MIN)
+        S_j_inv_sqrt = 1.0 / torch.sqrt(S_j)
+        G_j_inv_sqrt = U_j @ torch.diag_embed(S_j_inv_sqrt) @ U_j.transpose(-2, -1)
+    except Exception as e:
+        print(f"[WARNING] eigh failed on G_j. Returning Identity. Error: {e}")
+        I = torch.eye(G_j.shape[-1], device=G_j.device, dtype=G_j.dtype).expand_as(G_j)
+        return I
 
     S_j_sqrt = torch.sqrt(S_j)
     G_j_sqrt = U_j @ torch.diag_embed(S_j_sqrt) @ U_j.transpose(-2, -1)
     A = G_j_sqrt @ G_i @ G_j_sqrt
     A = safe_symmetrize(A)
 
-    S_A, U_A = torch.linalg.eigh(A)
-    S_A = torch.clamp(S_A, min=EIGVAL_CLAMP_MIN)
-    S_A_sqrt = torch.sqrt(S_A)
-    A_sqrt = U_A @ torch.diag_embed(S_A_sqrt) @ U_A.transpose(-2, -1)
+    try:
+        S_A, U_A = torch.linalg.eigh(A)
+        S_A = torch.clamp(S_A, min=EIGVAL_CLAMP_MIN)
+        S_A_sqrt = torch.sqrt(S_A)
+        A_sqrt = U_A @ torch.diag_embed(S_A_sqrt) @ U_A.transpose(-2, -1)
+    except Exception as e:
+        print(f"[WARNING] eigh failed on A. Returning Identity. Error: {e}")
+        I = torch.eye(G_j.shape[-1], device=G_j.device, dtype=G_j.dtype).expand_as(G_j)
+        return I
 
     P = G_j_inv_sqrt @ A_sqrt @ G_j_inv_sqrt
+
+    if torch.isnan(P).any() or torch.isinf(P).any():
+        print("[WARNING] NaN/Inf detected in P. Returning Identity.")
+        I = torch.eye(P.shape[-1], device=P.device, dtype=P.dtype).expand_as(P)
+        P = I
 
     return P
