@@ -162,7 +162,7 @@ class Pretrainer:
             optimizer.zero_grad()
             data = data.to(self.device)
             z, z_tan = self.model(data)
-            knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
+            knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn, is_to_undirected=True)
             triple_paths, _, _ = search_triangles(knn_edge_index,
                                                   self.configs.num_path_samples_global,
                                                   self.configs.path_sample_times_global,
