@@ -55,7 +55,7 @@ class RPGPrompt(nn.Module):
         log_metric_align = weights @ matrix_log_diag(proto_metric)   # [*, M]
 
         dist = torch.sum((z_adapt.unsqueeze(1) - proto_z.unsqueeze(0)) ** 2, dim=-1).mean()   # [N, K]
-        align_loss =  torch.norm(log_metric_align - log_metric_adapt, dim=-1, p=2).mean() + dist
+        align_loss =  (torch.norm(log_metric_align - log_metric_adapt, dim=-1, p=2)**2).mean() + dist
         loss = align_loss * self.align_coef
         return z_log_metric_adapt, loss
 
