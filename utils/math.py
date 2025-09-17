@@ -1,4 +1,5 @@
 import torch
+from torch_geometric.utils import to_undirected, remove_self_loops
 
 EPS = 1e-6
 MAX = 50
@@ -80,3 +81,42 @@ def parallel_translation(G_i: torch.Tensor, G_j: torch.Tensor) -> torch.Tensor:
     """
     P = torch.sqrt(G_i / G_j.clamp(min=EPS))  # [*, M]
     return P
+
+
+def knn_graphs(dense_adj: torch.Tensor, top_k: int, dim=-1, return_weight=False):
+    """
+    Construct KNN graph for dense adjacency matrix with weights.
+    """
+    N = dense_adj.shape[0]
+    device = dense_adj.device
+    topk_vals, topk_indices = dense_adj.topk(k=top_k + 1, dim=dim)
+    topk_indices = topk_indices[:, 1:]  # [N, top_k]
+    topk_vals = topk_vals[:, 1:]
+
+    row = torch.arange(N, device=device).unsqueeze(1).expand(N, top_k)  # [N, top_k]
+    col = topk_indices  # [N, top_k]
+
+    edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)  # [2, N * top_k]
+
+    edge_index = to_undirected(edge_index, num_nodes=N)
+
+    edge_index, _ = remove_self_loops(edge_index)
+
+    if return_weight:
+        row, col = edge_index
+        edge_weight = dense_adj[row, col]
+    else:
+        edge_weight = None
+
+    return edge_index, edge_weight
+
+
+def diag_metric_logmap(G_i, G_j):
+    """
+    Compute the diagonal metric logmap P: \log_{G_i}(G_j)
+    :param G_i: [*, M]
+    :param G_j:[*, M]
+    :return: tangent vector at G_i
+    """
+    mid_term = matrix_log_diag(G_j) - matrix_log_diag(G_i)
+    return G_i * mid_term

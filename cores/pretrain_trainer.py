@@ -130,23 +130,13 @@ class Pretrainer:
             z, z_tan = self.model(data)
             local_loss = self.model.local_struct_loss(z, z_tan)
 
-            knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
-            triple_paths, _, _ = search_triangles(knn_edge_index,
-                                                  self.configs.num_path_samples_global,
-                                                  self.configs.path_sample_times_global,
-                                                  return_relabel_mapping=True)
-            geo_loss = 0.
-            for t in range(self.configs.path_sample_times_global):
-                geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
-            geo_loss /= self.configs.path_sample_times_global
-            local_loss += geo_loss
-
             if epoch >= self.configs.warmup_epochs and epoch >= 1:
                 proto_loss = self.model.prototype_loss(z, data.data_name_map)
                 local_loss += proto_loss
 
             local_loss.backward()
             optimizer.step()
+            self.model.update_prototype(z.detach(), z_tan.detach(), data.data_name_map)
 
             total_loss += local_loss.item()
             total_batches += 1
@@ -162,35 +152,60 @@ class Pretrainer:
                 )
 
             del data, z, z_tan
+            torch.cuda.empty_cache()
+        # gc.collect()
+
+        # ===== Mix training for global distribution =====
+        self.logger.info("---------------Mix training for global distribution----------------")
+        loader_start_time = time.time()
+        for batch_idx, data in enumerate(loader):
+            optimizer.zero_grad()
+            data = data.to(self.device)
+            z, z_tan = self.model(data)
+            knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
+            triple_paths, _, _ = search_triangles(knn_edge_index,
+                                                  self.configs.num_path_samples_global,
+                                                  self.configs.path_sample_times_global,
+                                                  return_relabel_mapping=True)
+            geo_loss = 0.
+            for t in range(self.configs.path_sample_times_global):
+                geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
+            geo_loss /= self.configs.path_sample_times_global
+            geo_loss.backward()
+            optimizer.step()
+
+            total_loss += geo_loss.item()
+            total_batches += 1
+
+            if (batch_idx + 1) % self.configs.log_interval == 0:
+                self._log_progress(
+                    epoch=epoch,
+                    batch_idx=batch_idx + 1,
+                    dataset_len=len(loader),
+                    loss=geo_loss.item(),
+                    start_loader_time=loader_start_time,
+                    batches_done=batch_idx + 1
+                )
+
+        del data, z, z_tan
         torch.cuda.empty_cache()
 
-        self.logger.info("---------------Updating Riemannian Prototypes----------------")
-        with torch.no_grad():
-            for batch_idx, data in enumerate(loader):
-                optimizer.zero_grad()
-                data = data.to(self.device)
-                z, z_tan = self.model(data)
-                self.model.update_prototype(z.detach(), z_tan.detach(), data.data_name_map)
-        del z, z_tan, data
-        torch.cuda.empty_cache()
-
+        # ===== Refine manifold structure from locality =====
         self.logger.info("--------------Refine manifold structure from locality---------------")
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
+            dataset = Node2GraphDataset(data, self.configs.k_hops,
+                                        self.configs.num_neighbors,
+                                        self.dataset_dict[data_name])
             with torch.no_grad():
-                triple_paths, _, _ = search_triangles(data.edge_index,
-                                                      self.configs.num_path_samples_local,
-                                                      self.configs.path_sample_times_local,
-                                                      return_relabel_mapping=True)
+                triple_paths, mappings, _ = search_triangles(data.edge_index,
+                                                             self.configs.num_path_samples_local,
+                                                             self.configs.path_sample_times_local,
+                                                             return_relabel_mapping=True)
             loader_start_time = time.time()
             for t in range(self.configs.path_sample_times_local):
-                with torch.no_grad():
-                    input_node_idx = torch.unique(triple_paths[t])
-                    dataset = Node2GraphDataset(data, self.configs.k_hops,
-                                                self.configs.num_neighbors,
-                                                self.dataset_dict[data_name],
-                                                input_node_idx)
-                    graph = Batch.from_data_list([d for d in dataset]).to(self.device)
+                input_node_idx = mappings[t][torch.unique(triple_paths[t])]
+                graph = Batch.from_data_list([dataset[i] for i in input_node_idx.cpu().tolist()]).to(self.device)
                 optimizer.zero_grad()
                 z, z_tan = self.model(graph)
                 geo_loss = self.model.refine_struct_loss(z_tan, triple_paths[t])
@@ -209,12 +224,10 @@ class Pretrainer:
                         start_loader_time=loader_start_time,
                         batches_done=t + 1
                     )
-
-                del graph, z, z_tan, dataset
+                del z, z_tan, graph
                 torch.cuda.empty_cache()
-                gc.collect()
 
-            del data, triple_paths, z, z_tan
+            del data, dataset, triple_paths, mappings
             torch.cuda.empty_cache()
             gc.collect()
 
@@ -229,7 +242,7 @@ class Pretrainer:
                 z, z_tan = self.model(data)
                 knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
                 triple_paths, _, _ = search_triangles(knn_edge_index,
-                                                      self.configs.num_path_samples_global,
+                                                      self.configs.num_path_samples_global * data.batch_size,
                                                       self.configs.path_sample_times_global,
                                                       return_relabel_mapping=True)
                 geo_loss = 0.
