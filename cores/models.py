@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.data import Data, Batch
+from torch_geometric.utils import to_undirected
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
 from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
@@ -38,12 +39,13 @@ class PTGB(nn.Module):
 
         N = x.shape[0]
         weights = torch.sigmoid(self.att_proj(self.generators).repeat(B, 1) @ self.att_proj(x).t())  # [BM, N]
-        knn_edge_index, weights = knn_graphs(weights, knn, return_weight=True)
+        knn_edge_index, add_edge_weight = knn_graphs(weights, knn, return_weight=True)
         add_edge_src, add_edge_dst = knn_edge_index[0], knn_edge_index[1]
 
-        new_edge_weight = torch.concat([edge_weight, weights], dim=-1)
         add_edge_index = torch.stack([add_edge_src + N, add_edge_dst], dim=0)
+        add_edge_index, add_edge_weight = to_undirected(add_edge_index, add_edge_weight, num_nodes=N + B * M)
         new_edge_index = torch.concat([edge_index, add_edge_index], dim=-1)
+        new_edge_weight = torch.concat([edge_weight, add_edge_weight], dim=-1)
 
         # [1,...,N, M1,...,MM, ..., M1,...,MM]
         xp = torch.concat([x, self.generators.repeat(B, 1)], dim=0)  # [N + BM, d]
