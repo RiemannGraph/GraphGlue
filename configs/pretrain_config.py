@@ -32,15 +32,15 @@ def get_pretrain_parser():
     parser = argparse.ArgumentParser(description="Graph Pretraining Configuration")
 
     # Training
-    parser.add_argument('--batch_size', type=int, default=256,
+    parser.add_argument('--batch_size', type=int, default=512,
                         help='Batch size for data loading')
-    parser.add_argument('--num_path_samples_global', type=int, default=100,
+    parser.add_argument('--num_path_samples_global', type=int, default=2000,
                        help='Number of triangle samples for global construction')
-    parser.add_argument('--num_path_samples_local', type=int, default=100,
-                        help='Number of triangle samples for local construction')
-    parser.add_argument('--path_sample_times_global', type=int, default=20,
+    parser.add_argument('--path_sample_times_global', type=int, default=5,
                         help='Times of path samples for global construction')
-    parser.add_argument('--path_sample_times_local', type=int, default=500,
+    parser.add_argument('--num_path_samples_local', type=int, default=200,
+                        help='Number of triangle samples for local construction')
+    parser.add_argument('--path_sample_times_local', type=int, default=1000,
                         help='Times of path samples for local construction')
     parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')

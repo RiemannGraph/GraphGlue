@@ -54,10 +54,10 @@ def add_model_config(parser: ArgumentParser):
     group = parser.add_argument_group("Model Architecture")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                       default=["ogbn-arxiv", "Reddit", "Computers", "FB15k_237"],
+                       default=["Reddit", "FB15k_237"],
                        help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
-                       default=["PROTEINS"],
+                       default=["PROTEINS", "HIV"],
                        help='graph-level pretraining datasets')
     parser.add_argument('--k_hops', type=int, default=2,
                         help='subgraph sample hops <= len(num_neighbors)')
@@ -87,11 +87,11 @@ def add_model_config(parser: ArgumentParser):
     # model configurations
     group.add_argument('--n_layers', type=int, default=2,
                        help='Number of GNN layers')
-    group.add_argument('--in_dim', type=int, default=64,
+    group.add_argument('--in_dim', type=int, default=128,
                        help='Input feature dimension')
-    group.add_argument('--hid_dim', type=int, default=256,
+    group.add_argument('--hid_dim', type=int, default=512,
                        help='Hidden dimension')
-    group.add_argument('--att_dim', type=int, default=256,
+    group.add_argument('--att_dim', type=int, default=512,
                        help='Attention dimension (if used)')
     group.add_argument('--num_generators', type=int, default=32,
                        help='Number of generators in FM')
