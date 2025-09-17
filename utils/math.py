@@ -83,7 +83,7 @@ def parallel_translation(G_i: torch.Tensor, G_j: torch.Tensor) -> torch.Tensor:
     return P
 
 
-def knn_graphs(dense_adj: torch.Tensor, top_k: int, dim=-1, return_weight=False):
+def knn_graphs(dense_adj: torch.Tensor, top_k: int, dim=-1, return_weight=False, is_to_undirected=False):
     """
     Construct KNN graph for dense adjacency matrix with weights.
     """
@@ -98,9 +98,8 @@ def knn_graphs(dense_adj: torch.Tensor, top_k: int, dim=-1, return_weight=False)
 
     edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)  # [2, N * top_k]
 
-    edge_index = to_undirected(edge_index, num_nodes=N)
-
-    edge_index, _ = remove_self_loops(edge_index)
+    if is_to_undirected:
+        edge_index = to_undirected(edge_index, num_nodes=N)
 
     if return_weight:
         row, col = edge_index

@@ -205,7 +205,7 @@ class RPGraphFM(nn.Module):
             param.requires_grad_(True)
 
     @staticmethod
-    def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False):
+    def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False, is_to_undirected: bool = False):
         """
         Construct symmetric KNN graph (undirected, no self-loops).
 
@@ -221,7 +221,7 @@ class RPGraphFM(nn.Module):
 
         similarity = h @ h.t()  # [N, N]
 
-        return knn_graphs(similarity, top_k, return_weight=return_weight)
+        return knn_graphs(similarity, top_k, return_weight=return_weight, is_to_undirected=is_to_undirected)
 
 
 class RiemannianPrototypeManager(nn.Module):

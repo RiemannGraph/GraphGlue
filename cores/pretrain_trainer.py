@@ -193,6 +193,7 @@ class Pretrainer:
         # ===== Refine manifold structure from locality =====
         self.logger.info("--------------Refine manifold structure from locality---------------")
         for data_name in self.pretrain_single_graph_data:
+            self.logger.info(f"===============Refining {data_name} =======================")
             data = load_pretrain_single_graph_data(self.configs, data_name)
             dataset = Node2GraphDataset(data, self.configs.k_hops,
                                         self.configs.num_neighbors,
@@ -232,6 +233,7 @@ class Pretrainer:
             gc.collect()
 
         for data_name in self.pretrain_multi_graph_data:
+            self.logger.info(f"===============Refining {data_name} =======================")
             dataset = load_pretrain_multi_graph_data(self.configs, data_name, self.dataset_dict[data_name])
             loader = DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=True,
                                 num_workers=self.configs.num_workers)
@@ -240,9 +242,9 @@ class Pretrainer:
                 optimizer.zero_grad()
                 data = data.to(self.device)
                 z, z_tan = self.model(data)
-                knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn)
+                knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn, is_to_undirected=True)
                 triple_paths, _, _ = search_triangles(knn_edge_index,
-                                                      self.configs.num_path_samples_global * data.batch_size,
+                                                      self.configs.num_path_samples_global,
                                                       self.configs.path_sample_times_global,
                                                       return_relabel_mapping=True)
                 geo_loss = 0.
