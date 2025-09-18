@@ -212,3 +212,5 @@ checkpoints/
 logs/
 scripts/
 results/
+
+*.ipynb

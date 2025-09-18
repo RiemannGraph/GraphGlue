@@ -56,7 +56,7 @@ def get_pretrain_parser():
                         help="Proportion of validation set.")
 
     # Training
-    parser.add_argument("--align_coef", type=float, default=0.1,
+    parser.add_argument("--align_coef", type=float, default=0.01,
                         help="Coefficient for alignment loss.")
     parser.add_argument("--batch_size", type=int, default=128,
                         help="Batch size for task training.")
