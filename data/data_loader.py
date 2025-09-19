@@ -23,18 +23,28 @@ def load_pretrain_single_graph_data(configs, data_name: str):
     ])
     if data_name == "ogbn-arxiv":
         dataset = PygNodePropPredDataset(root=root, name=data_name, transform=transform)
-    elif data_name == 'Computers':
+    elif data_name in ["Computers", "Photo"]:
         dataset = Amazon(root, data_name, transform=transform)
     elif data_name == 'Reddit':
         dataset = Reddit(f"{root}/{data_name}", transform=transform)
+    elif data_name == "FacebookPagePage":
+        dataset = FacebookPagePage(f"{root}/{data_name}", transform=transform)
     elif data_name == 'FB15k_237':
         kg_transform = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
         dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=kg_transform, transform=transform)
+    elif data_name == "WordNet18RR":
+        kg_transform = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
+                                      configs.nv_walk_length, configs.nv_context_size,
+                                      configs.nv_lr, configs.nv_walks_per_node,
+                                      configs.nv_p, configs.nv_q, configs.nv_num_epochs)
+        dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=kg_transform, transform=transform)
     elif data_name == 'PPI':
         dataset = AttributedGraphDataset(root, name=data_name.lower(), transform=transform)
+    elif data_name in ["Cora", "CiteSeers", "PubMed"]:
+        dataset = Planetoid(root, data_name, transform=transform)
     else:
         raise ValueError('Invalid data_name')
     data = dataset[0]
@@ -43,9 +53,11 @@ def load_pretrain_single_graph_data(configs, data_name: str):
 
 def load_pretrain_multi_graph_data(configs, data_name: str, data_name_map: int):
     root = configs.root
-    if data_name in ["PCBA", "HIV"]:
+    if data_name in ["PCBA", "HIV", "Lipophilicity"]:
+        if data_name == "Lipophilicity":
+            data_name = "lipo"
         dataset = MoleculeNet(root, name=data_name, transform=UnifyFeatureDims(configs.in_dim))
-    elif data_name in ["PROTEINS", "MUTAG", "ENZYMES"]:
+    elif data_name in ["PROTEINS", "MUTAG"]:
         dataset = TUDataset(root, data_name, transform=UnifyFeatureDims(configs.in_dim))
     else:
         raise ValueError('Invalid data_name')
@@ -193,7 +205,7 @@ class Node2GraphDataset(Dataset):
         """
         super(Node2GraphDataset, self).__init__()
         assert len(num_neighbors) == k_hops, "sampling neighbor hops should be equal to k_hops"
-        self.data = data.clone()
+        self.data = data
         self.k_hops = k_hops
         self.input_node_idx = input_node_idx if input_node_idx is not None else torch.arange(data.num_nodes)
         self.data_name_map = data_name_map
@@ -237,7 +249,7 @@ class Node2GraphDataset(Dataset):
         mapping = (n_id == target_node).nonzero(as_tuple=True)[0].item()
 
         data = Data(
-            x=self.data.x[n_id],
+            x=self.data.x[n_id].clone(),
             edge_index=edge_index,
             # original_node_ids=n_id,
             # center_node_idx=mapping, # target node index in subset

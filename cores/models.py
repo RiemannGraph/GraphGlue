@@ -140,21 +140,25 @@ class RPGraphFM(nn.Module):
         """
         if triple_paths.numel() > 0:
             metric = diagonal_metric(z_tan)  # [N, M]
-            vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
-            metric_i, metric_j, metric_k = metric[vi], metric[vj], metric[vk]  # [T, M]
-            metrics = torch.stack([metric_i, metric_j, metric_k], dim=0)  # [3, T, M]
-            src_indices = torch.tensor([0, 1, 0], device=metrics.device)
-            dst_indices = torch.tensor([1, 2, 2], device=metrics.device)
-            pt_matrix = parallel_translation(metrics[src_indices], metrics[dst_indices])  # [3, T, M]
-
-            log_r_matrix_ij = matrix_log_diag(metric_i) - matrix_log_diag(metric_j)  # [T]
-            log_r_matrix_jk = matrix_log_diag(metric_j) - matrix_log_diag(metric_k)
-            log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
-
-            geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
+            geo_loss = self.geo_loss_from_metric(metric, triple_paths)
         else:
             geo_loss = torch.zeros(1, device=z_tan.device, dtype=z_tan.dtype, requires_grad=True).squeeze()
 
+        return geo_loss
+
+    def geo_loss_from_metric(self, metric, triple_paths):
+        vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
+        metric_i, metric_j, metric_k = metric[vi], metric[vj], metric[vk]  # [T, M]
+        metrics = torch.stack([metric_i, metric_j, metric_k], dim=0)  # [3, T, M]
+        src_indices = torch.tensor([0, 1, 0], device=metrics.device)
+        dst_indices = torch.tensor([1, 2, 2], device=metrics.device)
+        pt_matrix = parallel_translation(metrics[src_indices], metrics[dst_indices])  # [3, T, M]
+
+        log_r_matrix_ij = matrix_log_diag(metric_i) - matrix_log_diag(metric_j)  # [T]
+        log_r_matrix_jk = matrix_log_diag(metric_j) - matrix_log_diag(metric_k)
+        log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
+
+        geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
         return geo_loss
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
@@ -207,7 +211,12 @@ class RPGraphFM(nn.Module):
             param.requires_grad_(True)
 
     @staticmethod
-    def knn_graph(h: torch.Tensor, top_k, return_weight: bool = False, is_to_undirected: bool = False):
+    def knn_graph(h: torch.Tensor,
+                  top_k,
+                  is_cross: bool = False,
+                  data_name_map=None,
+                  return_weight: bool = False,
+                  is_to_undirected: bool = False):
         """
         Construct symmetric KNN graph (undirected, no self-loops).
 
@@ -222,8 +231,17 @@ class RPGraphFM(nn.Module):
             top_k = N - 1
 
         similarity = h @ h.t()  # [N, N]
+        if is_cross:
+            assert data_name_map is not None, "data_name_map must be provided"
+            group_i = data_name_map.unsqueeze(1)  # (N, 1)
+            group_j = data_name_map.unsqueeze(0)  # (1, N)
+            mask = group_i != group_j  # (N, N)
 
-        return knn_graphs(similarity, top_k, return_weight=return_weight, is_to_undirected=is_to_undirected)
+            sim_masked = similarity.clone()
+            sim_masked[~mask] = float('-inf')
+            return knn_graphs(sim_masked, top_k, return_weight=return_weight, is_to_undirected=is_to_undirected)
+        else:
+            return knn_graphs(similarity, top_k, return_weight=return_weight, is_to_undirected=is_to_undirected)
 
 
 class RiemannianPrototypeManager(nn.Module):

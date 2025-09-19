@@ -162,11 +162,15 @@ class Pretrainer:
             optimizer.zero_grad()
             data = data.to(self.device)
             z, z_tan = self.model(data)
-            knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn, is_to_undirected=True)
-            triple_paths, _, _ = search_triangles(knn_edge_index,
-                                                  self.configs.num_path_samples_global,
-                                                  self.configs.path_sample_times_global,
-                                                  return_relabel_mapping=True)
+            with torch.no_grad():
+                knn_edge_index, _ = self.model.knn_graph(z, self.configs.knn,
+                                                         is_cross=True,
+                                                         data_name_map=data.data_name_map,
+                                                         is_to_undirected=True)
+                triple_paths, _, _ = search_triangles(knn_edge_index,
+                                                      self.configs.num_path_samples_global,
+                                                      self.configs.path_sample_times_global,
+                                                      return_relabel_mapping=True)
             geo_loss = 0.
             for t in range(self.configs.path_sample_times_global):
                 geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
