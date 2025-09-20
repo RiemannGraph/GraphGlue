@@ -281,9 +281,9 @@ class Link2GraphDataset(Dataset):
             k_hops: int = 2,
             num_neighbors: Optional[List[int]] = None,
             data_name_map: int = None,
-            input_edge_idx: torch.Tensor = None,  # 指定要采样的边索引
+            input_edge_idx: torch.Tensor = None,
             labeled: bool = False,
-            relation_mapping: Optional[Dict[int, int]] = None,  # ⬅️ 新增参数
+            relation_mapping: Optional[Dict[int, int]] = None,
     ):
         """
         Dataset that samples a k-hop subgraph around each link (edge), with edge_type as label.
@@ -416,7 +416,7 @@ class LinkCollater(Collater):
 
         for i, lbl in enumerate(labels):
             if isinstance(lbl, torch.Tensor) and lbl.dim() == 0:
-                print(f"ℹ️ label[{i}] 是 0-d tensor: {lbl}")
+                print(f"label[{i}] 是 0-d tensor: {lbl}")
 
         batch_obj = super().__call__(flattened)
 

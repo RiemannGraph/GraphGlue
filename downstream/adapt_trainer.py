@@ -129,7 +129,7 @@ class AdaptTrainer:
             self.logger.info("=====================================================")
             info = f'Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%' \
                              f'| Test Loss: {test_loss:.6f} ' \
-                             f'| Test Task Loss: {task_loss:.6f} \n' \
+                             f'| Test Task Loss: {task_loss:.6f}' \
                              f'| Rotation Score: {RS:.6f} ' \
                              f'| Scaling Score: {SS:.6f} ' \
                              f'| Sensitive Transfer Metric: {STM:.6f} | '
