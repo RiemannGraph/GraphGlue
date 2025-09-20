@@ -6,8 +6,7 @@ from sklearn.metrics import roc_auc_score
 
 
 def _forward_pass(model, data):
-    z_log_metric_adapt, align_loss = model(data)
-    pred = model.predict(z_log_metric_adapt, data)
+    pred, align_loss = model(data)
     return pred, align_loss
 
 

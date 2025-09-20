@@ -33,7 +33,6 @@ class ModelConfig:
     num_generators: int = 32
     bias: bool = True
     act_str: str = "gelu"
-    drop: float = 0.1
 
     conv_name: str = "gcn"
     normalize: bool = True
@@ -99,8 +98,6 @@ def add_model_config(parser: ArgumentParser):
                        help='GNN layer type')
     group.add_argument('--act_str', type=str, default='relu',
                        help='Activation function')
-    group.add_argument('--drop', type=float, default=0.1,
-                       help='Dropout rate')
     group.add_argument('--normalize', action='store_true',
                        help='Whether to normalize adjacency matrix')
     group.add_argument('--bias', action='store_false',

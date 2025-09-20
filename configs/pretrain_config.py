@@ -8,6 +8,7 @@ from configs.base_config import ModelConfig, add_model_config, load_config_from_
 @dataclass
 class PretrainConfig(ModelConfig):
     # Training
+    drop: float = 0.1
     batch_size: int = 128
     num_path_samples_global: int = 100
     num_path_samples_local: int = 100
@@ -44,6 +45,8 @@ def get_pretrain_parser():
                         help='Times of path samples for local construction')
     parser.add_argument('--pretrain_epochs', type=int, default=10,
                         help='Total pretrain epochs')
+    parser.add_argument('--drop', type=float, default=0.1,
+                       help='Dropout rate')
     parser.add_argument('--lr_pretrain', type=float, default=3e-4,
                         help='Learning rate for pretraining')
     parser.add_argument('--pretrain_weight_decay', type=float, default=0,
