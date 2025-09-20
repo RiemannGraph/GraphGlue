@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Dict
 import torch
 import torch_geometric.transforms as T
 from torch_geometric.datasets import (
@@ -109,36 +109,46 @@ def load_few_shot_multi_graph_data(configs, data_name, k_shot, num_splits, num_v
 def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_val=0.1):
     root = configs.root
     if data_name == "WordNet18RR":
-        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val)
         transform_x = Node2VecEmbedding(configs.nv_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
-        dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_split, transform_x]))
+        dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_x]))
     elif data_name == 'FB15k_237':
-        transform_split = FewShotLinkSplit(k_shot, num_splits, num_val)
         transform_x = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
-        dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_split, transform_x]))
+        dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_x]))
     else:
         raise ValueError('Invalid data_name')
     data = dataset[0]
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
-    train_mask, val_mask, test_mask = link_k_shot_split(data, k_shot, num_splits, num_val)
-    def mask2dataset(mask):
+    train_mask, val_mask, test_mask, selected_relations_list = link_k_shot_split(data, k_shot,
+                                                                                 num_splits, num_val,
+                                                                                 num_way=configs.num_way_link)
+
+    def mask2dataset(mask, split_relations_list):
         d_list = []
         for t in range(num_splits):
-            d_list.append(
-                Link2GraphDataset(data, configs.k_hops, configs.num_neighbors,
-                                  input_edge_idx=mask[:, t].nonzero().squeeze(),
-                                  labeled=True))
+            # global_rel → local_idx (0~9)
+            rel_to_idx = {rel.item(): i for i, rel in enumerate(split_relations_list[t])}
+            print(f"📊 Split {t} relation mapping: {rel_to_idx}")
+
+            ds = Link2GraphDataset(
+                data, configs.k_hops, configs.num_neighbors,
+                input_edge_idx=mask[:, t].nonzero().squeeze(),
+                labeled=True,
+                relation_mapping=rel_to_idx
+            )
+
+            d_list.append(ds)
         return d_list
-    train_sets = mask2dataset(train_mask)
-    val_sets = mask2dataset(val_mask)
-    test_sets = mask2dataset(test_mask)
+
+    train_sets = mask2dataset(train_mask, selected_relations_list)
+    val_sets = mask2dataset(val_mask, selected_relations_list)
+    test_sets = mask2dataset(test_mask, selected_relations_list)
     return data, train_sets, val_sets, test_sets
 
 
@@ -246,7 +256,7 @@ class Node2GraphDataset(Dataset):
         else:
             edge_index = torch.empty((2, 0), dtype=torch.long)
 
-        mapping = (n_id == target_node).nonzero(as_tuple=True)[0].item()
+        # mapping = (n_id == target_node).nonzero(as_tuple=True)[0].item()
 
         data = Data(
             x=self.data.x[n_id].clone(),
@@ -272,7 +282,8 @@ class Link2GraphDataset(Dataset):
             num_neighbors: Optional[List[int]] = None,
             data_name_map: int = None,
             input_edge_idx: torch.Tensor = None,  # 指定要采样的边索引
-            labeled: bool = False
+            labeled: bool = False,
+            relation_mapping: Optional[Dict[int, int]] = None,  # ⬅️ 新增参数
     ):
         """
         Dataset that samples a k-hop subgraph around each link (edge), with edge_type as label.
@@ -302,7 +313,16 @@ class Link2GraphDataset(Dataset):
         self._labeled = labeled
         if labeled:
             if hasattr(data, 'edge_type'):
-                self.edge_labels = data.edge_type[self.input_edge_idx]
+                self.edge_labels_global = data.edge_type[self.input_edge_idx]
+                if self.edge_labels_global.dim() == 0:
+                    self.edge_labels_global = self.edge_labels_global.unsqueeze(0)
+
+                if relation_mapping is not None:
+                    self.edge_labels = torch.tensor([
+                        relation_mapping[gl.item()] for gl in self.edge_labels_global
+                    ], dtype=torch.long)
+                else:
+                    raise ValueError("relation_mapping is None")
             else:
                 raise ValueError("No edge labels found. Please provide 'edge_type' or 'edge_attr'.")
 
@@ -351,12 +371,11 @@ class Link2GraphDataset(Dataset):
         u_local = (n_id_u == u).nonzero(as_tuple=True)[0].item()
         v_local = (n_id_v == v).nonzero(as_tuple=True)[0].item()
 
-        edge_label = self.edge_labels[idx]
+        edge_label = self.edge_labels[idx].reshape(-1)
 
         data_u = Data(
             x=self.data.x[n_id_u],
             edge_index=edge_index_u,
-            edge_label=edge_label,
             edge_weight=edge_weight_u,
             root_n_id=u_local,
             data_name_map=self.data_name_map,
@@ -366,13 +385,12 @@ class Link2GraphDataset(Dataset):
         data_v = Data(
             x=self.data.x[n_id_v],
             edge_index=edge_index_v,
-            edge_label=edge_label,
             edge_weight=edge_weight_v,
             root_n_id=v_local,
             data_name_map=self.data_name_map,
             data_type="node"
         )
-        return [data_u, data_v]
+        return [data_u, data_v], edge_label
 
 
 class LinkCollater(Collater):
@@ -380,16 +398,36 @@ class LinkCollater(Collater):
         super().__init__(dataset, follow_batch, exclude_keys)
 
     def __call__(self, batch):
+        pairs, labels = zip(*batch)
         flattened = []
-        for pair in batch:
-            flattened.extend(pair)
+        for i, pair in enumerate(pairs):
+            for j, data_obj in enumerate(pair):
+                for attr_name in ['x', 'edge_index', 'edge_weight']:
+                    if hasattr(data_obj, attr_name) and isinstance(getattr(data_obj, attr_name), torch.Tensor):
+                        tensor_attr = getattr(data_obj, attr_name)
+                        if tensor_attr.dim() == 0:
+                            print(f"Find 0-d tensor: batch[{i}][{j}].{attr_name}, value: {tensor_attr}")
+                            if attr_name == 'edge_weight':
+                                setattr(data_obj, attr_name, torch.tensor([], dtype=torch.float))
+                            elif attr_name == 'x':
+                                setattr(data_obj, attr_name,
+                                        torch.empty((0, data_obj.x.size(1)) if data_obj.x.dim() == 1 else data_obj.x))
+                flattened.append(data_obj)
+
+        for i, lbl in enumerate(labels):
+            if isinstance(lbl, torch.Tensor) and lbl.dim() == 0:
+                print(f"ℹ️ label[{i}] 是 0-d tensor: {lbl}")
 
         batch_obj = super().__call__(flattened)
 
         batch_obj.num_edges = len(batch)
 
-        edge_label = [pair[0].edge_label for pair in batch]  # List of labels
-        batch_obj.edge_label = torch.tensor(edge_label, device=flattened[0].x.device)
+        batch_obj.edge_label = torch.tensor(labels, device=flattened[0].x.device)  # [B]
+
+        if hasattr(self.dataset, 'relation_mapping'):
+            idx_to_rel = {v: k for k, v in self.dataset.relation_mapping.items()}
+            candidate_rels = [idx_to_rel[i] for i in range(len(idx_to_rel))]
+            batch_obj.candidate_relations = torch.tensor(candidate_rels)
 
         return batch_obj
 

@@ -64,14 +64,16 @@ class FewShotLinkSplit(BaseTransform):
         self.k_shot = k_shot
         self.num_splits = num_splits
         self.num_val = num_val
+        self.selected_relations_list = None
 
     def forward(self, data):
-        train_mask, val_mask, test_mask = link_k_shot_split(data,
+        train_mask, val_mask, test_mask, selected_relations_list = link_k_shot_split(data,
                                                             self.k_shot, self.num_splits,
                                                             self.num_val)
         data.train_mask = train_mask
         data.val_mask = val_mask
         data.test_mask = test_mask
+        self.selected_relations_list = selected_relations_list
         return data
 
 

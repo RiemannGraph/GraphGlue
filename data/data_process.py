@@ -111,9 +111,15 @@ def graph_few_shot_splits(dataset, k_shot, num_val, num_splits):
     return train_mask, val_mask, test_mask
 
 
-def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
+def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_way=10):
     """
-    :return list of (train_data, val_data, test_data) for each split
+
+    :param data: PyG-style data object with edge_index, edge_type
+    :param k_shot: int, number of training samples per selected relation
+    :param num_splits: int, number of random splits to generate
+    :param num_val: float, ratio of validation set from remaining edges (after k-shot)
+    :param num_way: int, number of relations to sample for few-shot (default=10)
+    :return: train_mask, val_mask, test_mask — each of shape [num_edges, num_splits]
     """
 
     edge_index = data.edge_index  # [2, num_edges]
@@ -125,12 +131,29 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
     val_masks = []
     test_masks = []
 
+    all_relations = []
+    for rel in range(num_relations):
+        if (edge_type == rel).any():
+            all_relations.append(rel)
+    all_relations = torch.tensor(all_relations)
+
+    selected_relations_list = []
+
     for _ in range(num_splits):
+        if len(all_relations) < num_way:
+            raise ValueError(f"Not enough relations ({len(all_relations)}) to sample {num_way}-way.")
+        perm = torch.randperm(len(all_relations))[:num_way]
+        selected_relations = all_relations[perm]  # [num_way]
+        selected_relations_list.append(selected_relations)
+
         train_indices = []
         val_indices = []
         test_indices = []
 
         for rel in range(num_relations):
+            if rel not in selected_relations:
+                continue
+
             rel_mask = (edge_type == rel)
             rel_indices = rel_mask.nonzero(as_tuple=False).view(-1)  # [num_rel_edges]
             num_rel_edges = rel_indices.size(0)
@@ -138,8 +161,8 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
             if num_rel_edges == 0:
                 continue
 
-            perm = torch.randperm(num_rel_edges)
-            rel_indices_shuffled = rel_indices[perm]
+            perm_rel = torch.randperm(num_rel_edges)
+            rel_indices_shuffled = rel_indices[perm_rel]
 
             k = min(k_shot, num_rel_edges)
             train_indices.append(rel_indices_shuffled[:k])
@@ -151,8 +174,7 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
                 val_split = torch.empty(0, dtype=torch.long)
                 test_split = torch.empty(0, dtype=torch.long)
             else:
-                val_ratio = num_val
-                val_size = int(num_remaining * val_ratio)
+                val_size = int(num_remaining * num_val)
                 val_split = remaining_indices[:val_size]
                 test_split = remaining_indices[val_size:]
 
@@ -163,9 +185,9 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
         val_idx = torch.cat(val_indices) if len(val_indices) > 0 else torch.empty(0, dtype=torch.long)
         test_idx = torch.cat(test_indices) if len(test_indices) > 0 else torch.empty(0, dtype=torch.long)
 
-        train_mask = torch.zeros(num_edges).bool()
-        val_mask = torch.zeros(num_edges).bool()
-        test_mask = torch.zeros(num_edges).bool()
+        train_mask = torch.zeros(num_edges, dtype=torch.bool)
+        val_mask = torch.zeros(num_edges, dtype=torch.bool)
+        test_mask = torch.zeros(num_edges, dtype=torch.bool)
 
         train_mask[train_idx] = True
         val_mask[val_idx] = True
@@ -175,8 +197,9 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1):
         val_masks.append(val_mask)
         test_masks.append(test_mask)
 
+    # Stack masks for all splits: [num_edges, num_splits]
     train_mask = torch.stack(train_masks, dim=1)
     val_mask = torch.stack(val_masks, dim=1)
     test_mask = torch.stack(test_masks, dim=1)
 
-    return train_mask, val_mask, test_mask
+    return train_mask, val_mask, test_mask, selected_relations_list

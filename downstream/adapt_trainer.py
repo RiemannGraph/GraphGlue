@@ -185,7 +185,7 @@ class AdaptTrainer:
             data, train_sets, val_sets, test_sets = load_few_shot_link_graph_data(configs, configs.data_name,
                                                                  configs.k_shot, configs.num_trials,
                                                                  configs.num_val)
-            num_classes = 10
+            num_classes = configs.num_way_link
             num_features = data.x.shape[-1]
             for t in range(configs.num_trials):
                 train_loaders.append(LinkDataLoader(train_sets[t], batch_size=configs.batch_size, shuffle=True))

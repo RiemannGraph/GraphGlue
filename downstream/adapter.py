@@ -27,7 +27,6 @@ class RPGPrompt(nn.Module):
         self.pretrained_model.frozen()
         self.prompt_z = nn.Parameter(torch.empty(configs.hid_dim, configs.hid_dim))
         nn.init.orthogonal_(self.prompt_z.data)
-        # self.prompt_z_tan = nn.Parameter(torch.eye(configs.hid_dim) + 0.01 * torch.randn(configs.hid_dim, configs.hid_dim))
 
         self.align_coef = configs.align_coef
         num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
@@ -37,8 +36,7 @@ class RPGPrompt(nn.Module):
             ActivateModule(configs.act_str),
             nn.Linear(configs.hid_dim, num_datasets, bias=configs.bias),
         )
-        self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
-        self.head = ADAPTERS[task_type](configs.hid_dim + configs.num_generators, num_cls)
+        self.head = ADAPTERS[task_type](configs.hid_dim + configs.num_generators, num_cls, configs.drop)
 
     def forward(self, graph: Data):
         graph.x = self.input_lin(graph.x)
@@ -65,20 +63,24 @@ class RPGPrompt(nn.Module):
 
 
 class NodeClassificationAdapter(nn.Module):
-    def __init__(self, hid_dim: int, num_classes: int):
+    def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
         super(NodeClassificationAdapter, self).__init__()
         self.head = nn.Linear(hid_dim, num_classes)
+        self.drop = nn.Dropout(drop)
 
     def forward(self, z: torch.Tensor, graph: Data):
+        z = self.drop(z)
         return self.head(z)  # Only use labeled nodes in few-shot
 
 
 class GraphClassificationAdapter(nn.Module):
-    def __init__(self, hid_dim: int, num_classes: int):
+    def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
         super(GraphClassificationAdapter, self).__init__()
         self.head = nn.Linear(hid_dim, num_classes)
+        self.drop = nn.Dropout(drop)
 
     def forward(self, z: torch.Tensor, graph: Data):
+        z = self.drop(z)
         return self.head(z)
 
 
@@ -87,11 +89,13 @@ class LinkClassificationAdapter(nn.Module):
     For knowledge graph link prediction (edge classification / triple scoring)
     Using dot product or bilinear scoring.
     """
-    def __init__(self, hid_dim: int, num_classes: int):
+    def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
         super(LinkClassificationAdapter, self).__init__()
         self.score_fn = nn.Bilinear(hid_dim, hid_dim, num_classes)
+        self.drop = nn.Dropout(drop)
 
     def forward(self, z: torch.Tensor, graph: Data):
+        z = self.drop(z)
         src_emb = z[::2]
         dst_emb = z[1::2]
         return self.score_fn(src_emb, dst_emb)
