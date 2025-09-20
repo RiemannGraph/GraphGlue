@@ -6,7 +6,7 @@ from cores.loss_funcs import PTGBLoss
 from cores.models import RPGraphFM
 from torch_geometric.data import Data
 
-from utils.math import parallel_translation, diagonal_metric, matrix_log_diag
+from utils.math import diagonal_metric, matrix_log_diag
 
 
 class RPGPrompt(nn.Module):
