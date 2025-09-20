@@ -65,7 +65,7 @@ class RPGPrompt(nn.Module):
         U, S, Vt = torch.svd(Q)
         RS = torch.frobenius_norm(U @ Vt - torch.eye(d, device=Q.device), dim=[-1, -2])
         SS = torch.norm(S - torch.ones_like(S), dim=-1)
-        return RS, SS
+        return RS.item(), SS.item()
 
 
 class NodeClassificationAdapter(nn.Module):

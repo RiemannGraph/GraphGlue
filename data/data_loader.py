@@ -134,7 +134,7 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
         for t in range(num_splits):
             # global_rel → local_idx (0~9)
             rel_to_idx = {rel.item(): i for i, rel in enumerate(split_relations_list[t])}
-            print(f"📊 Split {t} relation mapping: {rel_to_idx}")
+            print(f"Split {t} relation mapping: {rel_to_idx}")
 
             ds = Link2GraphDataset(
                 data, configs.k_hops, configs.num_neighbors,
@@ -299,7 +299,7 @@ class Link2GraphDataset(Dataset):
         assert len(num_neighbors) == k_hops, "sampling neighbor hops should be equal to k_hops"
         self.data = data
         self.k_hops = k_hops
-        self.input_edge_idx = input_edge_idx if input_edge_idx is not None else torch.arange(data.edge_index.size(1))
+        self.input_edge_idx = input_edge_idx.reshape(-1) if input_edge_idx is not None else torch.arange(data.edge_index.size(1))
         self.data_name_map = data_name_map
 
         edge_nodes = data.edge_index[:, self.input_edge_idx].flatten().unique()
