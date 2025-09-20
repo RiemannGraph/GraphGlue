@@ -114,15 +114,41 @@ def load_few_shot_link_graph_data(configs, data_name, k_shot, num_splits, num_va
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
         dataset = WordNet18RR(f"{root}/{data_name}", pre_transform=T.Compose([transform_x]))
+        data = dataset[0]
     elif data_name == 'FB15k_237':
         transform_x = Node2VecEmbedding(configs.in_dim, configs.nv_batch_size,
                                       configs.nv_walk_length, configs.nv_context_size,
                                       configs.nv_lr, configs.nv_walks_per_node,
                                       configs.nv_p, configs.nv_q, configs.nv_num_epochs)
-        dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_x]))
+        train_dataset = FB15k_237(f"{root}/{data_name}", split='train', pre_transform=T.Compose([transform_x]))
+        valid_dataset = FB15k_237(f"{root}/{data_name}", split='val', pre_transform=T.Compose([transform_x]))
+        test_dataset = FB15k_237(f"{root}/{data_name}", split='test', pre_transform=T.Compose([transform_x]))
+
+        train_data = train_dataset[0]
+        valid_data = valid_dataset[0]
+        test_data = test_dataset[0]
+
+        all_edge_index = torch.cat([
+            train_data.edge_index,
+            valid_data.edge_index,
+            test_data.edge_index
+        ], dim=1)
+
+        all_edge_type = torch.cat([
+            train_data.edge_type,
+            valid_data.edge_type,
+            test_data.edge_type
+        ])
+
+        num_nodes = train_data.num_nodes
+        data = Data(
+            x=train_data.x if hasattr(train_data, 'x') else None,
+            edge_index=all_edge_index,
+            edge_type=all_edge_type,
+            num_nodes=num_nodes
+        )
     else:
         raise ValueError('Invalid data_name')
-    data = dataset[0]
     if data.edge_weight is None:
         data.edge_weight = torch.ones_like(data.edge_index[0]).float()
     train_mask, val_mask, test_mask, selected_relations_list = link_k_shot_split(data, k_shot,

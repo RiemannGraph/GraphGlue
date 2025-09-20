@@ -158,7 +158,7 @@ def link_k_shot_split(data, k_shot, num_splits, num_val=0.1, num_way=10):
             rel_indices = rel_mask.nonzero(as_tuple=False).view(-1)  # [num_rel_edges]
             num_rel_edges = rel_indices.size(0)
 
-            if num_rel_edges == 0:
+            if num_rel_edges < k_shot + 2:
                 continue
 
             perm_rel = torch.randperm(num_rel_edges)

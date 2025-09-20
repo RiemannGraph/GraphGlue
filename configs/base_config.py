@@ -53,7 +53,7 @@ def add_model_config(parser: ArgumentParser):
     group = parser.add_argument_group("Model Architecture")
     parser.add_argument("--root", type=str, default="./datasets", help="Root directory for datasets.")
     group.add_argument('--pretrain_single_graph_data', type=str, nargs='+',
-                       default=["ogbn-arxiv", "Computers", "Reddit", "FB15k_237"],
+                       default=["ogbn-arxiv", "Computers", "Reddit"],
                        help='node-level pretraining datasets')
     group.add_argument('--pretrain_multi_graph_data', type=str, nargs='+',
                        default=["PROTEINS", "HIV"],

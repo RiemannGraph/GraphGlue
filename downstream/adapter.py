@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 from cores.layers import ActivateModule
 from cores.loss_funcs import PTGBLoss
 from cores.models import RPGraphFM
@@ -104,6 +104,8 @@ class LinkClassificationAdapter(nn.Module):
         z = self.drop(z)
         src_emb = z[::2]
         dst_emb = z[1::2]
+        src_emb = F.normalize(src_emb, p=2, dim=1)
+        dst_emb = F.normalize(dst_emb, p=2, dim=1)
         return self.score_fn(src_emb, dst_emb)
 
 
