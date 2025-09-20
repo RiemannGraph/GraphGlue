@@ -50,6 +50,7 @@ class AdaptTrainer:
 
         # Train loop
         total_metric = []
+        total_test_loss = []
         with open(f"./results/{self.configs.data_name}.txt", "a") as f:
             f.write(f"============={self.configs.k_shot}-Shot {self.configs.task_type}=================\n")
             f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
@@ -120,18 +121,20 @@ class AdaptTrainer:
                                             **AdaptTrainer.TASK_CONFIGS[self.task_type],
                                             metric=self.configs.metric)
             self.logger.info("=====================================================")
-            self.logger.info(f'Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%')
+            self.logger.info(f'Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%'
+                             f'| Test Loss: {test_loss:.6f} | ')
             self.logger.info("=====================================================")
             total_metric.append(test_metric)
+            total_test_loss.append(test_loss)
             with open(f"./results/{self.configs.data_name}.txt", "a") as f:
                 f.write(f"Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%\n")
             f.close()
-
-        self.logger.info(f'Final Test {self.configs.metric.upper()}: '
-                         f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} %')
+        info = f'Final Test {self.configs.metric.upper()}: ' \
+                f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} % \n' \
+                f'Final Test Loss: {np.mean(total_test_loss):.6f} \u00B1 {np.std(total_test_loss):.6f}'
+        self.logger.info(info)
         with open(f"./results/{self.configs.data_name}.txt", "a") as f:
-            f.write(f'Final Test {self.configs.metric.upper()}: '
-                         f'{np.mean(total_metric) * 100:.2f} ± {np.std(total_metric) * 100:.2f} %\n')
+            f.write(info + "\n")
             f.write("======================================================================\n")
         f.close()
 
