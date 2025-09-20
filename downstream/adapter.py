@@ -58,6 +58,15 @@ class RPGPrompt(nn.Module):
         pred = self.head(z_log_metric_adapt, graph)
         return pred, loss
 
+    @torch.no_grad()
+    def transfer_metric(self):
+        Q = self.prompt_z.data
+        d = Q.shape[-1]
+        U, S, Vt = torch.svd(Q)
+        RS = torch.frobenius_norm(U @ Vt - torch.eye(d, device=Q.device), dim=[-1, -2])
+        SS = torch.norm(S - torch.ones_like(S), dim=-1)
+        return RS, SS
+
 
 class NodeClassificationAdapter(nn.Module):
     def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
