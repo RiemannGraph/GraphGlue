@@ -21,6 +21,8 @@ class AdaptionConfig(ModelConfig):
     metric: str = "acc"
 
     # Training
+    align_knn: int = 3
+    align_samples: int = 1000
     drop: int = 0.1
     align_coef: float = 0.1
     batch_size: int = 128
@@ -60,6 +62,8 @@ def get_adaption_parser():
                         help="Proportion of validation set.")
 
     # Training
+    parser.add_argument('--align_knn', type=int, default=3)
+    parser.add_argument('--align_samples', type=int, default=1000)
     parser.add_argument("--drop", type=float, default=0.2)
     parser.add_argument("--align_coef", type=float, default=1.,
                         help="Coefficient for alignment loss.")
@@ -144,6 +148,8 @@ def parse_adaption_config() -> AdaptionConfig:
         num_way_link=args.num_way_link,
         num_trials=args.num_trials,
         num_val=args.num_val,
+        align_knn=args.align_knn,
+        align_samples=args.align_samples,
         align_coef=args.align_coef,
         batch_size=args.batch_size,
         lr_task=args.lr_task,

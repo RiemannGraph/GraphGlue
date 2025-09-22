@@ -30,6 +30,8 @@ class RPGPrompt(nn.Module):
         nn.init.orthogonal_(self.prompt_z.data)
 
         self.align_coef = configs.align_coef
+        self.align_knn = configs.align_knn
+        self.align_samples = configs.align_samples
         self.head = ADAPTERS[task_type](configs.hid_dim + configs.num_generators, num_cls, configs.drop)
 
     def forward(self, graph: Data):
@@ -52,7 +54,7 @@ class RPGPrompt(nn.Module):
         N = z.shape[0]
         K = z_proto.shape[0]
         weights = z @ z_proto.t()   # [N, K]
-        knn_edge_index, _ = knn_graphs(weights, 3, return_weight=True, is_to_undirected=False)
+        knn_edge_index, _ = knn_graphs(weights, self.align_knn, return_weight=True, is_to_undirected=False)
         src, dst = knn_edge_index[0], knn_edge_index[1]
         dst += N
         knn_edge_index = to_undirected(torch.stack([src, dst], dim=0), num_nodes=N + K)
@@ -62,7 +64,7 @@ class RPGPrompt(nn.Module):
         mask = proto_src != proto_dst
         proto_edge_index = torch.stack([proto_src[mask], proto_dst[mask]], dim=0)  # shape: [2, K*(K-1)]
         edge_index = torch.concat([knn_edge_index, proto_edge_index], dim=-1)
-        paths = search_triangles(edge_index, num_path_samples=1000)
+        paths = search_triangles(edge_index, num_path_samples=self.align_samples)
         holo_loss, curv_loss = self.pretrained_model.geo_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
         return holo_loss, curv_loss
 
