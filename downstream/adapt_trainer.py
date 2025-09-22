@@ -52,9 +52,7 @@ class AdaptTrainer:
         total_metric = []
         total_test_loss = []
         total_task_loss = []
-        total_RS = []
-        total_SS = []
-        total_STM = []
+        total_align_loss = []
         with open(f"./results/{self.configs.data_name}.txt", "a") as f:
             f.write(f"============={self.configs.k_shot}-Shot {self.configs.task_type}=================\n")
             f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
@@ -98,7 +96,7 @@ class AdaptTrainer:
 
                 # Evaluation
                 if (epoch + 1) % self.configs.eval_interval == 0:
-                    val_loss, _, val_metric = eval_step(val_loaders[trial], model, self.device,
+                    val_loss, _, val_metric, _ = eval_step(val_loaders[trial], model, self.device,
                                            **AdaptTrainer.TASK_CONFIGS[self.task_type],
                                                   metric=self.configs.metric)
                     self.logger.info(f'Epoch {epoch:03d} | Val {self.configs.metric.upper()}: {val_metric * 100:.2f}%')
@@ -121,26 +119,20 @@ class AdaptTrainer:
             self.logger.info(f"===========Loading best checkpoint from {self.configs.checkpoint_dir}/model_best.pth===========")
             load_checkpoint(f"{self.configs.checkpoint_dir}/model_best.pth", model)
             model.eval()
-            test_loss, task_loss, test_metric = eval_step(test_loaders[trial], model, self.device,
+            test_loss, task_loss, test_metric, align_loss = eval_step(test_loaders[trial], model, self.device,
                                             **AdaptTrainer.TASK_CONFIGS[self.task_type],
                                             metric=self.configs.metric)
-            RS, SS = model.transfer_metric()
-            STM = RS + SS
             self.logger.info("=====================================================")
             info = f'Trial {trial:02d} | Test {self.configs.metric.upper()}: {test_metric * 100:.2f}%' \
                              f'| Test Loss: {test_loss:.6f} ' \
                              f'| Test Task Loss: {task_loss:.6f}' \
-                             f'| Rotation Score: {RS:.6f} ' \
-                             f'| Scaling Score: {SS:.6f} ' \
-                             f'| Sensitive Transfer Metric: {STM:.6f} | '
+                             f'| Test Align Loss: {align_loss:.6f} '
             self.logger.info(info)
             self.logger.info("=====================================================")
             total_metric.append(test_metric)
             total_test_loss.append(test_loss)
             total_task_loss.append(task_loss)
-            total_RS.append(RS)
-            total_SS.append(SS)
-            total_STM.append(STM)
+            total_align_loss.append(align_loss)
             with open(f"./results/{self.configs.data_name}.txt", "a") as f:
                 f.write(info + "\n")
             f.close()
@@ -148,9 +140,7 @@ class AdaptTrainer:
                 f'{np.mean(total_metric) * 100:.2f} \u00B1 {np.std(total_metric) * 100:.2f} % \n' \
                 f'Final Test Loss: {np.mean(total_test_loss):.6f} \u00B1 {np.std(total_test_loss):.6f} \n' \
                f'Final Test Task Loss: {np.mean(total_task_loss):.6f} \u00B1 {np.std(total_task_loss):.6f} \n' \
-               f'Final Rotation Score: {np.mean(total_RS):.6f} \u00B1 {np.std(total_RS):.6f} \n' \
-               f'Final Scaling Score: {np.mean(total_SS):.6f} \u00B1 {np.std(total_SS):.6f}\n' \
-               f'Final Sensitive Transfer Metric: {np.mean(total_STM):.6f} \u00B1 {np.std(total_STM):.6f}'
+               f'Final Test Align Loss: {np.mean(total_align_loss):.6f} \u00B1 {np.std(total_align_loss):.6f} \n'
         self.logger.info(info)
         with open(f"./results/{self.configs.data_name}.txt", "a") as f:
             f.write(info + "\n")
@@ -158,7 +148,7 @@ class AdaptTrainer:
         f.close()
 
     def _train_epoch(self, train_loader, model, optimizer, trial):
-        loss, task_loss, acc = train_step(train_loader, optimizer, model, self.device,
+        loss, task_loss, acc, _ = train_step(train_loader, optimizer, model, self.device,
                                **AdaptTrainer.TASK_CONFIGS[self.task_type],
                                metric=self.configs.metric)
         return loss, task_loss, acc

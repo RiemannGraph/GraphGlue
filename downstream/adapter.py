@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from cores.layers import ActivateModule
-from cores.loss_funcs import PTGBLoss
+from torch_geometric.utils import to_undirected
+
 from cores.models import RPGraphFM
 from torch_geometric.data import Data
 
-from utils.math import diagonal_metric, matrix_log_diag
+from utils import search_triangles
+from utils.math import diagonal_metric, matrix_log_diag, knn_graphs
 
 
 class RPGPrompt(nn.Module):
@@ -29,13 +30,6 @@ class RPGPrompt(nn.Module):
         nn.init.orthogonal_(self.prompt_z.data)
 
         self.align_coef = configs.align_coef
-        num_datasets = len(configs.pretrain_single_graph_data) + len(configs.pretrain_multi_graph_data)
-        self.gated_func = nn.Sequential(
-            nn.Linear(configs.hid_dim + configs.num_generators, configs.hid_dim, bias=configs.bias),
-            nn.Dropout(configs.drop),
-            ActivateModule(configs.act_str),
-            nn.Linear(configs.hid_dim, num_datasets, bias=configs.bias),
-        )
         self.head = ADAPTERS[task_type](configs.hid_dim + configs.num_generators, num_cls, configs.drop)
 
     def forward(self, graph: Data):
@@ -44,28 +38,33 @@ class RPGPrompt(nn.Module):
 
         z_adapt = z @ self.prompt_z
         z_tan_adapt = z_tan @ self.prompt_z
-        log_metric_adapt = matrix_log_diag(diagonal_metric(z_tan_adapt))
+        metric_adapt = diagonal_metric(z_tan_adapt)
+        log_metric_adapt = matrix_log_diag(metric_adapt)
         z_log_metric_adapt = torch.concat([z_adapt, log_metric_adapt], dim=-1)
 
-        weights = self.gated_func(z_log_metric_adapt).softmax(-1)    # [*, K]
-
         _, proto_z, proto_metric = self.pretrained_model.get_all_prototypes() # [K, M]
-        log_metric_align = weights @ matrix_log_diag(proto_metric)   # [*, M]
 
-        dist = torch.sum((z_adapt.unsqueeze(1) - proto_z.unsqueeze(0)) ** 2, dim=-1).mean()   # [N, K]
-        align_loss =  (torch.norm(log_metric_align - log_metric_adapt, dim=-1, p=2)**2).mean() + dist
-        loss = align_loss * self.align_coef
+        loss = self.align_coef * self.transfer_metric(z_adapt, metric_adapt, proto_z, proto_metric)
         pred = self.head(z_log_metric_adapt, graph)
         return pred, loss
 
-    @torch.no_grad()
-    def transfer_metric(self):
-        Q = self.prompt_z.data
-        d = Q.shape[-1]
-        U, S, Vt = torch.svd(Q)
-        RS = torch.frobenius_norm(U @ Vt - torch.eye(d, device=Q.device), dim=[-1, -2])
-        SS = torch.norm(S - torch.ones_like(S), dim=-1)
-        return RS.item(), SS.item()
+    def transfer_metric(self, z, metric, z_proto, proto_metric):
+        N = z.shape[0]
+        K = z_proto.shape[0]
+        weights = z @ z_proto.t()   # [N, K]
+        knn_edge_index, _ = knn_graphs(weights, 3, return_weight=True, is_to_undirected=False)
+        src, dst = knn_edge_index[0], knn_edge_index[1]
+        dst += N
+        knn_edge_index = to_undirected(torch.stack([src, dst], dim=0), num_nodes=N + K)
+        proto_idx = torch.arange(K).to(z.device) + N
+        proto_src = proto_idx.unsqueeze(1).expand(-1, K).reshape(-1)
+        proto_dst = proto_idx.unsqueeze(0).expand(K, -1).reshape(-1)
+        mask = proto_src != proto_dst
+        proto_edge_index = torch.stack([proto_src[mask], proto_dst[mask]], dim=0)  # shape: [2, K*(K-1)]
+        edge_index = torch.concat([knn_edge_index, proto_edge_index], dim=-1)
+        paths = search_triangles(edge_index, num_path_samples=1000)
+        geo_loss = self.pretrained_model.geo_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
+        return geo_loss
 
 
 class NodeClassificationAdapter(nn.Module):

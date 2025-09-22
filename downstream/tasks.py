@@ -24,6 +24,7 @@ def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y', metr
     model.train()
     total_loss = 0.0
     total_task_loss = 0.0
+    total_align_loss = 0.0
     preds_list = []
     trues_list = []
 
@@ -42,19 +43,22 @@ def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y', metr
 
         total_loss += loss.item()
         total_task_loss += task_loss.item()
+        total_align_loss += align_loss.item()
         preds_list.append(pred.detach().cpu().numpy().argmax(-1))
         trues_list.append(label.detach().cpu().numpy())
 
     acc = _compute_metrics(preds_list, trues_list, metric)
     avg_loss = total_loss / len(loader)
     avg_task_loss = total_task_loss / len(loader)
-    return avg_loss, avg_task_loss, acc
+    avg_align_loss = total_align_loss / len(loader)
+    return avg_loss, avg_task_loss, acc, avg_align_loss
 
 
 def eval_step(loader, model: RPGPrompt, device, label_attr='y', metric="acc"):
     model.eval()
     total_loss = 0.0
     total_task_loss = 0.0
+    total_align_loss = 0.0
     preds_list = []
     trues_list = []
 
@@ -69,10 +73,12 @@ def eval_step(loader, model: RPGPrompt, device, label_attr='y', metric="acc"):
             loss = task_loss + align_loss
             total_loss += loss.item()
             total_task_loss += task_loss.item()
+            total_align_loss += align_loss.item()
             preds_list.append(pred.detach().cpu().numpy().argmax(-1))
             trues_list.append(label.detach().cpu().numpy())
 
     acc = _compute_metrics(preds_list, trues_list, metric)
     avg_loss = total_loss / len(loader)
     total_task_loss = total_task_loss / len(loader)
-    return avg_loss, total_task_loss, acc
+    total_align_loss = total_align_loss / len(loader)
+    return avg_loss, total_task_loss, acc, total_align_loss

@@ -99,7 +99,6 @@ class RPGraphFM(nn.Module):
         datasets_list = configs.pretrain_single_graph_data + configs.pretrain_multi_graph_data
         self.prototype_manager = RiemannianPrototypeManager(datasets_list, configs.hid_dim, configs.num_generators,
                                                             configs.ema_alpha, configs.temperature)
-        self.ptg_loss = PTGBLoss(configs.num_generators, configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
         self.geo_loss = GeometricPersistLoss(configs.geo_regular_coef)
         self.knn = configs.knn
@@ -126,9 +125,8 @@ class RPGraphFM(nn.Module):
         return z_center, z_tan
 
     def local_struct_loss(self, z, z_tan):
-        ptg_loss = self.ptg_loss(z_tan)
         cl_loss = self.contra_loss(z, z.unsqueeze(1) + z_tan)
-        return ptg_loss + cl_loss
+        return cl_loss
 
     def refine_struct_loss(self, z_tan, triple_paths):
         """
