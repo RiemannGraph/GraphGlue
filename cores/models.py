@@ -138,7 +138,8 @@ class RPGraphFM(nn.Module):
         """
         if triple_paths.numel() > 0:
             metric = diagonal_metric(z_tan)  # [N, M]
-            geo_loss = self.geo_loss_from_metric(metric, triple_paths)
+            holo_loss, curv_loss = self.geo_loss_from_metric(metric, triple_paths)
+            geo_loss = holo_loss + curv_loss
         else:
             geo_loss = torch.zeros(1, device=z_tan.device, dtype=z_tan.dtype, requires_grad=True).squeeze()
 
@@ -156,8 +157,8 @@ class RPGraphFM(nn.Module):
         log_r_matrix_jk = matrix_log_diag(metric_j) - matrix_log_diag(metric_k)
         log_r_matrix = torch.stack([log_r_matrix_ij, log_r_matrix_jk], dim=0)  # [2, T]
 
-        geo_loss = self.geo_loss(pt_matrix, log_r_matrix)
-        return geo_loss
+        holo_loss, curv_loss = self.geo_loss(pt_matrix, log_r_matrix)
+        return holo_loss, curv_loss
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
         proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')

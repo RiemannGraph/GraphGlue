@@ -56,7 +56,7 @@ class GeometricPersistLoss(nn.Module):
         :param log_r_matrix: Log Volume Ratio matrix with shape [2, T]
         :return: geometric persistent loss
         """
-        pt_loss = torch.mean(torch.norm(pt_matrix[1] * pt_matrix[0] - pt_matrix[2], p=2, dim=-1) ** 2)
+        holo_loss = torch.mean(torch.norm(pt_matrix[1] * pt_matrix[0] - pt_matrix[2], p=2, dim=-1) ** 2)
         curv_loss = torch.mean((log_r_matrix[0] - log_r_matrix[1]) ** 2)
-        return self.geo_regular_coef * (pt_loss + curv_loss)
+        return self.geo_regular_coef * holo_loss, self.geo_regular_coef * curv_loss
 

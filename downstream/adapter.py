@@ -44,9 +44,9 @@ class RPGPrompt(nn.Module):
 
         _, proto_z, proto_metric = self.pretrained_model.get_all_prototypes() # [K, M]
 
-        loss = self.align_coef * self.transfer_metric(z_adapt, metric_adapt, proto_z, proto_metric)
+        holo_loss, curv_loss = self.transfer_metric(z_adapt, metric_adapt, proto_z, proto_metric)
         pred = self.head(z_log_metric_adapt, graph)
-        return pred, loss
+        return pred, self.align_coef * holo_loss, self.align_coef *  curv_loss
 
     def transfer_metric(self, z, metric, z_proto, proto_metric):
         N = z.shape[0]
@@ -63,8 +63,8 @@ class RPGPrompt(nn.Module):
         proto_edge_index = torch.stack([proto_src[mask], proto_dst[mask]], dim=0)  # shape: [2, K*(K-1)]
         edge_index = torch.concat([knn_edge_index, proto_edge_index], dim=-1)
         paths = search_triangles(edge_index, num_path_samples=1000)
-        geo_loss = self.pretrained_model.geo_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
-        return geo_loss
+        holo_loss, curv_loss = self.pretrained_model.geo_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
+        return holo_loss, curv_loss
 
 
 class NodeClassificationAdapter(nn.Module):
