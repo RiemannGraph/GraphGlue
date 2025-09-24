@@ -3,15 +3,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import to_undirected
 
-from cores.models import RPGraphFM
+from cores.models import GraphGlue
 from torch_geometric.data import Data
 from cores.layers import ActivateModule
 from utils import search_triangles
 from utils.math import diagonal_metric, matrix_log_diag, knn_graphs
 
 
-class RPGPrompt(nn.Module):
-    def __init__(self, configs, feature_dim, pretrained_model: RPGraphFM, task_type: str, num_cls: int):
+class GraphGlueAdapter(nn.Module):
+    def __init__(self, configs,
+                 feature_dim,
+                 pretrained_model: GraphGlue,
+                 task_type: str,
+                 num_cls: int):
         """
 
         :param configs: PretrainConfig
@@ -20,7 +24,7 @@ class RPGPrompt(nn.Module):
         :param task_type: [node_cls, graph_cls, edge_cls]
         :param num_cls: classes number
         """
-        super(RPGPrompt, self).__init__()
+        super(GraphGlueAdapter, self).__init__()
         assert task_type in ["node_cls", "graph_cls", "link_cls"], "the task type must be one of [node_cls, graph_cls, link_cls]"
         self.configs = configs
         self.input_lin = nn.Linear(feature_dim, configs.in_dim)
@@ -57,11 +61,11 @@ class RPGPrompt(nn.Module):
         log_metric_align = weights @ proto_metric   # [*, M]
         z_log_metric_adapt = torch.concat([z_adapt, log_metric_adapt, log_metric_align], dim=-1)
 
-        holo_loss, curv_loss = self.transfer_metric(z_adapt, metric_adapt, proto_z, proto_metric)
+        holo_loss, curv_loss = self.geometric_transfer_metric(z_adapt, metric_adapt, proto_z, proto_metric)
         pred = self.head(z_log_metric_adapt, graph)
         return pred, self.align_coef * holo_loss, self.align_coef *  curv_loss
 
-    def transfer_metric(self, z, metric, z_proto, proto_metric):
+    def geometric_transfer_metric(self, z, metric, z_proto, proto_metric):
         N = z.shape[0]
         K = z_proto.shape[0]
         weights = z @ z_proto.t()   # [N, K]
@@ -76,24 +80,13 @@ class RPGPrompt(nn.Module):
         proto_edge_index = torch.stack([proto_src[mask], proto_dst[mask]], dim=0)  # shape: [2, K*(K-1)]
         edge_index = torch.concat([knn_edge_index, proto_edge_index], dim=-1)
         paths = search_triangles(edge_index, num_path_samples=self.align_samples)
-        holo_loss, curv_loss = self.pretrained_model.geo_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
+        holo_loss, curv_loss = self.pretrained_model.gluing_loss_from_metric(torch.concat([metric, proto_metric], dim=0), paths[0])
         return holo_loss, curv_loss
 
 
-class NodeClassificationAdapter(nn.Module):
+class GraphClassificationHead(nn.Module):
     def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
-        super(NodeClassificationAdapter, self).__init__()
-        self.head = nn.Linear(hid_dim, num_classes)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, z: torch.Tensor, graph: Data):
-        z = self.drop(z)
-        return self.head(z)  # Only use labeled nodes in few-shot
-
-
-class GraphClassificationAdapter(nn.Module):
-    def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
-        super(GraphClassificationAdapter, self).__init__()
+        super(GraphClassificationHead, self).__init__()
         self.head = nn.Linear(hid_dim, num_classes)
         self.drop = nn.Dropout(drop)
 
@@ -102,13 +95,13 @@ class GraphClassificationAdapter(nn.Module):
         return self.head(z)
 
 
-class LinkClassificationAdapter(nn.Module):
+class LinkClassificationHead(nn.Module):
     """
     For knowledge graph link prediction (edge classification / triple scoring)
     Using dot product or bilinear scoring.
     """
     def __init__(self, hid_dim: int, num_classes: int, drop: float = 0.2):
-        super(LinkClassificationAdapter, self).__init__()
+        super(LinkClassificationHead, self).__init__()
         self.score_fn = nn.Bilinear(hid_dim, hid_dim, num_classes)
         self.drop = nn.Dropout(drop)
 
@@ -122,7 +115,7 @@ class LinkClassificationAdapter(nn.Module):
 
 
 ADAPTERS = {
-    'node_cls': NodeClassificationAdapter,
-    'graph_cls': GraphClassificationAdapter,
-    'link_cls': LinkClassificationAdapter,
+    'node_cls': GraphClassificationHead,
+    'graph_cls': GraphClassificationHead,
+    'link_cls': LinkClassificationHead,
 }

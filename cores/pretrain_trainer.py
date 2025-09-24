@@ -2,7 +2,7 @@ import torch
 from torch_geometric.loader import DataLoader
 from torch.utils.data import ConcatDataset, WeightedRandomSampler
 from torch_geometric.data import Batch
-from cores.models import RPGraphFM
+from cores.models import GraphGlue
 from data import (
     load_pretrain_single_graph_data,
     load_pretrain_multi_graph_data,
@@ -32,7 +32,7 @@ class Pretrainer:
         self.dataset_dict = {k: v for v, k in
                              enumerate(self.pretrain_single_graph_data + self.pretrain_multi_graph_data)}
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = RPGraphFM(configs).to(self.device)
+        self.model = GraphGlue(configs).to(self.device)
         self.logger = create_logger(configs.log_path) if logger is None else logger
         self.start_epoch = 0
         self.start_time = None
@@ -173,7 +173,7 @@ class Pretrainer:
                                                       return_relabel_mapping=True)
             geo_loss = 0.
             for t in range(self.configs.path_sample_times_global):
-                geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
+                geo_loss += self.model.manifold_gluing_loss(z_tan, triple_paths[t])
             geo_loss /= self.configs.path_sample_times_global
             geo_loss.backward()
             optimizer.step()
@@ -213,7 +213,7 @@ class Pretrainer:
                 graph = Batch.from_data_list([dataset[i] for i in input_node_idx.cpu().tolist()]).to(self.device)
                 optimizer.zero_grad()
                 z, z_tan = self.model(graph)
-                geo_loss = self.model.refine_struct_loss(z_tan, triple_paths[t])
+                geo_loss = self.model.manifold_gluing_loss(z_tan, triple_paths[t])
                 geo_loss.backward()
                 optimizer.step()
 
@@ -253,7 +253,7 @@ class Pretrainer:
                                                       return_relabel_mapping=True)
                 geo_loss = 0.
                 for t in range(self.configs.path_sample_times_global):
-                    geo_loss += self.model.refine_struct_loss(z_tan, triple_paths[t])
+                    geo_loss += self.model.manifold_gluing_loss(z_tan, triple_paths[t])
                 geo_loss /= self.configs.path_sample_times_global
                 geo_loss.backward()
                 optimizer.step()
@@ -338,12 +338,18 @@ class Pretrainer:
 
         for data_name in self.pretrain_single_graph_data:
             data = load_pretrain_single_graph_data(self.configs, data_name)
-            datasets.append(Node2GraphDataset(data, self.configs.k_hops,
-                                              self.configs.num_neighbors, self.dataset_dict[data_name]))
+            datasets.append(Node2GraphDataset(data,
+                                              self.configs.k_hops,
+                                              self.configs.num_neighbors,
+                                              self.dataset_dict[data_name])
+                            )
 
         for data_name in self.pretrain_multi_graph_data:
             datasets.append(
-                load_pretrain_multi_graph_data(self.configs, data_name, self.dataset_dict[data_name]))
+                load_pretrain_multi_graph_data(self.configs,
+                                               data_name,
+                                               self.dataset_dict[data_name])
+            )
 
         weights = []
         for d in datasets:

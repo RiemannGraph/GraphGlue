@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from downstream.adapter import RPGPrompt
+from downstream.adapter import GraphGlueAdapter
 from sklearn.metrics import roc_auc_score
 
 
@@ -20,7 +20,12 @@ def _compute_metrics(preds_list, trues_list, metric: str = "acc"):
     return metric
 
 
-def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y', metric="acc"):
+def train_step(loader,
+               optimizer,
+               model: GraphGlueAdapter,
+               device,
+               label_attr='y',
+               metric="acc"):
     model.train()
     total_loss = 0.0
     total_task_loss = 0.0
@@ -57,7 +62,11 @@ def train_step(loader, optimizer, model: RPGPrompt, device, label_attr='y', metr
     return avg_loss, avg_task_loss, acc, avg_holo_loss, avg_curv_loss
 
 
-def eval_step(loader, model: RPGPrompt, device, label_attr='y', metric="acc"):
+def eval_step(loader,
+              model: GraphGlueAdapter,
+              device,
+              label_attr='y',
+              metric="acc"):
     model.eval()
     total_loss = 0.0
     total_task_loss = 0.0

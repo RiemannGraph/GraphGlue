@@ -32,32 +32,6 @@ class UnifyFeatureDims(BaseTransform):
         return data
 
 
-class RenameFromRootedEgoNets(BaseTransform):
-    """
-    Rename the attribute of neighbor-sampled graph from RootedEgoNets.
-    """
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, ego_net_data):
-        data = Data()
-        batch_graph_nums = ego_net_data.x.shape[0]
-        data.batch_graph_nums = batch_graph_nums
-        data.x = ego_net_data.x[ego_net_data.n_id]
-        if hasattr(ego_net_data, 'y'):
-            if ego_net_data.y is not None:
-                data.y = ego_net_data.y[ego_net_data.n_id]
-        if hasattr(ego_net_data, 'edge_type'):
-            if ego_net_data.edge_type is not None:
-                data.edge_type = ego_net_data.edge_type[ego_net_data.e_id]
-        data.edge_index = ego_net_data.sub_edge_index
-        data.edge_weight = ego_net_data.edge_weight[ego_net_data.e_id]
-        data.batch = ego_net_data.n_sub_batch
-        data.origin_edge_index = ego_net_data.edge_index
-        data.n_id = ego_net_data.n_id
-        return data
-
-
 class FewShotLinkSplit(BaseTransform):
     def __init__(self, k_shot, num_splits, num_val=0.1):
         super().__init__()

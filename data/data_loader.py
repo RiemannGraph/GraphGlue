@@ -10,9 +10,9 @@ from torch_geometric.loader.dataloader import Collater
 from torch_geometric.loader import NeighborSampler
 from data.data_custom import FB15k_237
 from ogb.nodeproppred import PygNodePropPredDataset
-from data.data_transform import FlattenLabels, UnifyFeatureDims, FewShotLinkSplit, Node2VecEmbedding
+from data.data_transform import FlattenLabels, UnifyFeatureDims, Node2VecEmbedding
 from data.data_process import graph_few_shot_splits, link_k_shot_split
-from torch_geometric.data import Dataset, Data, Batch
+from torch_geometric.data import Dataset, Data
 
 
 def load_pretrain_single_graph_data(configs, data_name: str):
@@ -282,13 +282,9 @@ class Node2GraphDataset(Dataset):
         else:
             edge_index = torch.empty((2, 0), dtype=torch.long)
 
-        # mapping = (n_id == target_node).nonzero(as_tuple=True)[0].item()
-
         data = Data(
             x=self.data.x[n_id].clone(),
             edge_index=edge_index,
-            # original_node_ids=n_id,
-            # center_node_idx=mapping, # target node index in subset
             edge_weight=self.data.edge_weight[torch.cat([adj.e_id for adj in adjs])] \
             if hasattr(self.data, 'edge_weight') and self.data.edge_weight is not None \
             else torch.ones_like(edge_index[0]).float(),

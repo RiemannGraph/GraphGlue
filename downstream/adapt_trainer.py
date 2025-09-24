@@ -7,18 +7,17 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch_geometric.loader import DataLoader
 
-from cores.models import RPGraphFM
+from cores.models import GraphGlue
 from data import (
     load_few_shot_multi_graph_data,
     load_few_shot_single_graph_data,
     load_few_shot_link_graph_data,
     LinkDataLoader
 )
-from downstream.adapter import RPGPrompt
+from downstream.adapter import GraphGlueAdapter
 from downstream.tasks import train_step, eval_step
 from utils.checkpoints import (
     load_checkpoint,
-    get_latest_checkpoint,
     EarlyStopping
 )
 from utils.logger import create_logger
@@ -59,10 +58,10 @@ class AdaptTrainer:
             f.write(f"Pretraining Model: {self.configs.pretrained_checkpoint}\n")
         f.close()
         for trial in range(self.configs.num_trials):
-            pretrained_model = RPGraphFM(self.configs)
+            pretrained_model = GraphGlue(self.configs)
             load_checkpoint(self.configs.pretrained_checkpoint, pretrained_model, map_location='cuda')
-            model = RPGPrompt(self.configs, num_features, pretrained_model,
-                              self.configs.task_type, num_classes).to(self.device)
+            model = GraphGlueAdapter(self.configs, num_features, pretrained_model,
+                                     self.configs.task_type, num_classes).to(self.device)
             optimizer = Adam(
                 model.parameters(),
                 lr=self.configs.lr_task,
@@ -170,14 +169,17 @@ class AdaptTrainer:
             num_features = dataset.num_features
             for t in range(configs.num_trials):
                 train_loaders.append(DataLoader(dataset[train_mask[:, t]],
-                                                batch_size=configs.batch_size, shuffle=True,
-                                                exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                                                batch_size=configs.batch_size,
+                                                shuffle=True,
+                                                exclude_keys=["edge_attr"]))
                 val_loaders.append(DataLoader(dataset[val_mask[:, t]],
-                                              batch_size=configs.batch_size, shuffle=False,
-                                              exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                                              batch_size=configs.batch_size,
+                                              shuffle=False,
+                                              exclude_keys=["edge_attr"]))
                 test_loaders.append(DataLoader(dataset[test_mask[:, t]],
-                                               batch_size=configs.batch_size, shuffle=False,
-                                               exclude_keys=["original_node_ids", "center_node_idx", "edge_attr"]))
+                                               batch_size=configs.batch_size,
+                                               shuffle=False,
+                                               exclude_keys=["edge_attr"]))
         elif configs.task_type == "graph_cls":
             dataset, train_mask, val_mask, test_mask = load_few_shot_multi_graph_data(configs, configs.data_name,
                                                            configs.k_shot, configs.num_trials,
@@ -185,9 +187,15 @@ class AdaptTrainer:
             num_classes = dataset.num_classes
             num_features = dataset.num_features
             for t in range(configs.num_trials):
-                train_loaders.append(DataLoader(dataset[train_mask[:, t]], batch_size=configs.batch_size, shuffle=True))
-                val_loaders.append(DataLoader(dataset[val_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
-                test_loaders.append(DataLoader(dataset[test_mask[:, t]], batch_size=configs.batch_size, shuffle=False))
+                train_loaders.append(DataLoader(dataset[train_mask[:, t]],
+                                                batch_size=configs.batch_size,
+                                                shuffle=True))
+                val_loaders.append(DataLoader(dataset[val_mask[:, t]],
+                                              batch_size=configs.batch_size,
+                                              shuffle=False))
+                test_loaders.append(DataLoader(dataset[test_mask[:, t]],
+                                               batch_size=configs.batch_size,
+                                               shuffle=False))
 
         elif configs.task_type == "link_cls":
             data, train_sets, val_sets, test_sets = load_few_shot_link_graph_data(configs, configs.data_name,
@@ -196,9 +204,15 @@ class AdaptTrainer:
             num_classes = configs.num_way_link
             num_features = data.x.shape[-1]
             for t in range(configs.num_trials):
-                train_loaders.append(LinkDataLoader(train_sets[t], batch_size=configs.batch_size, shuffle=True))
-                val_loaders.append(LinkDataLoader(val_sets[t], batch_size=configs.batch_size, shuffle=False))
-                test_loaders.append(LinkDataLoader(test_sets[t], batch_size=configs.batch_size, shuffle=False))
+                train_loaders.append(LinkDataLoader(train_sets[t],
+                                                    batch_size=configs.batch_size,
+                                                    shuffle=True))
+                val_loaders.append(LinkDataLoader(val_sets[t],
+                                                  batch_size=configs.batch_size,
+                                                  shuffle=False))
+                test_loaders.append(LinkDataLoader(test_sets[t],
+                                                   batch_size=configs.batch_size,
+                                                   shuffle=False))
         else:
             raise NotImplementedError
         return (train_loaders, val_loaders, test_loaders), num_classes, num_features

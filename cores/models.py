@@ -2,11 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.pool import global_mean_pool
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Data
 from torch_geometric.utils import to_undirected
 from torch_scatter import scatter_mean
 from cores.layers import NormModule, FeedForwardLayer, GNNLayer
-from cores.loss_funcs import PTGBLoss, ContrastiveLoss, GeometricPersistLoss
+from cores.loss_funcs import ContrastiveLoss, ManifoldGlueLoss
 from utils.math import matrix_log_diag, matrix_exp_diag, parallel_translation, diagonal_metric, knn_graphs
 from typing import List, Optional, Dict, Tuple, Any, Mapping
 import re
@@ -14,9 +14,9 @@ import re
 EPS = 1e-6
 
 
-class PTGB(nn.Module):
+class SparsePerturbation(nn.Module):
     def __init__(self, num_generators, hid_dim, att_dim):
-        super(PTGB, self).__init__()
+        super(SparsePerturbation, self).__init__()
         self.num_generators = num_generators
         self.generators = nn.Parameter(torch.empty(num_generators, hid_dim))
         nn.init.orthogonal_(self.generators.data)
@@ -86,21 +86,25 @@ class PooLedSubgraphGNN(nn.Module):
         return x
 
 
-class RPGraphFM(nn.Module):
+class GraphGlue(nn.Module):
     def __init__(self, configs):
         super().__init__()
         self.num_generators = configs.num_generators
         self.input_lin = nn.Linear(configs.in_dim, configs.hid_dim)
-        self.ptg_bank = PTGB(configs.num_generators, configs.hid_dim, configs.att_dim)
+        self.graph_perturb = SparsePerturbation(configs.num_generators,
+                                                configs.hid_dim,
+                                                configs.att_dim)
         self.encoder = PooLedSubgraphGNN(configs.conv_name, configs.n_layers,
                                          configs.hid_dim, configs.hid_dim,
                                          configs.normalize, configs.bias,
                                          configs.norm_str, configs.act_str, configs.drop)
         datasets_list = configs.pretrain_single_graph_data + configs.pretrain_multi_graph_data
-        self.prototype_manager = RiemannianPrototypeManager(datasets_list, configs.hid_dim, configs.num_generators,
-                                                            configs.ema_alpha, configs.temperature)
+        self.prototype_manager = RiemannianPrototypeManager(datasets_list, configs.hid_dim,
+                                                            configs.num_generators,
+                                                            configs.ema_alpha,
+                                                            configs.temperature)
         self.contra_loss = ContrastiveLoss(configs.temperature)
-        self.geo_loss = GeometricPersistLoss(configs.geo_regular_coef)
+        self.geo_loss = ManifoldGlueLoss(configs.geo_regular_coef)
         self.knn = configs.knn
 
     def forward(self, graph: Data):
@@ -115,7 +119,7 @@ class RPGraphFM(nn.Module):
         B = graph.batch_size
 
         x = self.input_lin(x)
-        aug_graph = self.ptg_bank(x, graph.edge_index, graph.edge_weight, graph.batch, B, self.knn)
+        aug_graph = self.graph_perturb(x, graph.edge_index, graph.edge_weight, graph.batch, B, self.knn)
         z = self.encoder(aug_graph)
         z_center = z[: B]  # [B, d]
         z_aug = z[B:].reshape(B, -1, z.shape[-1])  # [B, M, d]
@@ -128,7 +132,7 @@ class RPGraphFM(nn.Module):
         cl_loss = self.contra_loss(z, z.unsqueeze(1) + z_tan)
         return cl_loss
 
-    def refine_struct_loss(self, z_tan, triple_paths):
+    def manifold_gluing_loss(self, z_tan, triple_paths):
         """
 
         :param z_tan: [N, M, d]
@@ -138,14 +142,14 @@ class RPGraphFM(nn.Module):
         """
         if triple_paths.numel() > 0:
             metric = diagonal_metric(z_tan)  # [N, M]
-            holo_loss, curv_loss = self.geo_loss_from_metric(metric, triple_paths)
+            holo_loss, curv_loss = self.gluing_loss_from_metric(metric, triple_paths)
             geo_loss = holo_loss + curv_loss
         else:
             geo_loss = torch.zeros(1, device=z_tan.device, dtype=z_tan.dtype, requires_grad=True).squeeze()
 
         return geo_loss
 
-    def geo_loss_from_metric(self, metric, triple_paths):
+    def gluing_loss_from_metric(self, metric, triple_paths):
         vi, vj, vk = triple_paths[0], triple_paths[1], triple_paths[2]
         metric_i, metric_j, metric_k = metric[vi], metric[vj], metric[vk]  # [T, M]
         metrics = torch.stack([metric_i, metric_j, metric_k], dim=0)  # [3, T, M]
@@ -160,7 +164,9 @@ class RPGraphFM(nn.Module):
         holo_loss, curv_loss = self.geo_loss(pt_matrix, log_r_matrix)
         return holo_loss, curv_loss
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
+    def load_state_dict(self, state_dict: Mapping[str, Any],
+                        strict: bool = True,
+                        assign: bool = False):
         proto_z_pattern = re.compile(r'^prototype_manager\.proto_z_(?!tan_)([a-zA-Z0-9_]+)$')
         proto_metric_pattern = re.compile(r'^prototype_manager\.proto_metric_([a-zA-Z0-9_]+)$')
         datasets_to_register = set()
@@ -251,7 +257,10 @@ class RiemannianPrototypeManager(nn.Module):
     Supports contrastive loss between node embeddings and prototypes.
     """
 
-    def __init__(self, datasets_list: List[str], hid_dim: int, num_generators: int, ema_alpha: float = 0.99,
+    def __init__(self, datasets_list: List[str],
+                 hid_dim: int,
+                 num_generators: int,
+                 ema_alpha: float = 0.99,
                  temperature: float = 1.0):
         super().__init__()
         self.datasets_list = [re.sub(r'[^a-zA-Z0-9_]', '_', name) for name in datasets_list]

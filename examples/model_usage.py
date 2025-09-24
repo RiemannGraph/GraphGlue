@@ -1,5 +1,5 @@
 import torch
-from cores.models import PTGB, PooLedSubgraphGNN
+from cores.models import SparsePerturbation, PooLedSubgraphGNN
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader, NeighborLoader
 from data.data_process import search_triangles, unify_feature_dimension, RenameFromRootedEgoNets
@@ -7,7 +7,7 @@ from torch_geometric.transforms import RootedEgoNets, Compose
 
 
 if __name__ == '__main__':
-    ptgb = PTGB(2, 8, 32)
+    ptgb = SparsePerturbation(2, 8, 32)
     gnn = PooLedSubgraphGNN("gcn", 2, 8, 16, bias=True, norm_str="none", act_str="relu", drop=0.1)
     x = torch.randn(5, 16)
     edge_index = torch.tensor([[0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 3], [2, 4], [3, 2], [3, 4], [4, 2], [4, 3]]).t().contiguous()
