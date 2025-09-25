@@ -32,3 +32,19 @@ with the file name of checkpoint that needed to use;
 ```${TASK_TYPE}``` with ```node_cls, graph_cls, link_cls```;
 ```${METRIC}$``` with ```acc``` or ```auc```;
 ```$K_SHOT$``` with ```1, 5``` or other number you want to transfer.
+
+## GraphGlue FrameWork
+<div align=center>
+<img src="./pics/framework.png" width=100% alt="GraphGlue" title="GraphGlue" >
+</div>
+<div align=center>
+Figure 1. An Illustration of GRAPHGLUE Framework
+</div>
+
+## Visualization of Glued Manifold
+<div align="center">
+<img src="./pics/manifold.png" width=100%>
+</div>
+<div align=center>
+Figure 2. Visualization of the pre-trained manifold from 6 datasets.
+</div>
