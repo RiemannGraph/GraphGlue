@@ -94,9 +94,9 @@ def get_adaption_parser():
     return parser
 
 
-def parse_adaption_config() -> AdaptionConfig:
+def parse_adaption_config(remaining_argv=None) -> AdaptionConfig:
     parser = get_adaption_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(remaining_argv)
 
     # If using YAML file
     if args.config_load_path:

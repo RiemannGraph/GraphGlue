@@ -72,9 +72,9 @@ def get_pretrain_parser():
     return parser
 
 
-def parse_pretrain_config() -> PretrainConfig:
+def parse_pretrain_config(remaining_argv=None) -> PretrainConfig:
     parser = get_pretrain_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(remaining_argv)
 
     # If using YAML file
     if args.config_load_path:
